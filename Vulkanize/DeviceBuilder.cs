@@ -73,12 +73,15 @@ public class DeviceBuilder
         if (_enableValidationLayers) SilkMarshal.Free((nint) createInfo.PpEnabledLayerNames);
         SilkMarshal.Free((nint) createInfo.PpEnabledExtensionNames);
 
+        _vk.GetDeviceQueue(device, indices.GraphicsFamily.Value, 0, out var queue);
+        
         return new DeviceInfo
         {
             Device = device,
             PhysicalDevice = _physicalDeviceInfo.PhysicalDevice,
             Surface = _physicalDeviceInfo.Surface,
-            QueueFamilies = indices
+            QueueFamilies = indices,
+            Queue = queue
         };
     }
 }

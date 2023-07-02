@@ -1,5 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
+using Silk.NET.Vulkan.Extensions.EXT;
 using Silk.NET.Vulkan.Extensions.KHR;
 
 namespace Vulkanize;
@@ -24,6 +25,8 @@ public static class Vulkanize
             throw new NotSupportedException("KHR_surface extension not found.");
         return khrSurface;
     }
+
+    public static KhrSurface CheckKhrSurfaceExtension(this Vk _) => CheckKhrSurfaceExtension();
     
     public static KhrSwapchain CheckKhrSwapchainExtension(Device device)
     { 
@@ -34,6 +37,20 @@ public static class Vulkanize
             throw new NotSupportedException("VK_KHR_swapchain extension not found.");
         return khrSwapChain;
     }
+
+    public static KhrSwapchain CheckKhrSwapchainExtension(this Vk _, Device device) => CheckKhrSwapchainExtension(device);
+
+    public static ExtDebugUtils CheckExtDebugUtils()
+    {
+        if (!Vk.CurrentInstance.HasValue)
+            throw new Exception("Create an Instance first");
+        var instance = Vk.CurrentInstance.Value;
+        if (!Vk.TryGetInstanceExtension(instance, out ExtDebugUtils debugUtils))
+            throw new Exception("Could not get instance extension debugUtils");
+        return debugUtils;
+    }
+
+    public static ExtDebugUtils CheckExtDebugUtils(this Vk _) => CheckExtDebugUtils();
     
     public static unsafe bool CheckValidationLayerSupport()
     {

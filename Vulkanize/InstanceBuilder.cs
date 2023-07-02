@@ -219,8 +219,7 @@ public class InstanceBuilder
 
     private unsafe DebugUtilsMessengerEXT CreateDebugUtilsMessenger(Instance instance)
     {
-        if (!_vk.TryGetInstanceExtension(instance, out ExtDebugUtils debugUtils))
-            throw new Exception("Could not get instance extension debugUtils");
+        var debugUtils = Vulkanize.CheckExtDebugUtils();
         var createInfo = new DebugUtilsMessengerCreateInfoEXT
         {
             SType = StructureType.DebugUtilsMessengerCreateInfoExt,

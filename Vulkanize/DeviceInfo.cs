@@ -8,4 +8,5 @@ public struct DeviceInfo
     public required PhysicalDevice PhysicalDevice;
     public required SurfaceKHR Surface;
     public required QueueFamilyIndices QueueFamilies;
+    public required Queue Queue;
 }
