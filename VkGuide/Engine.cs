@@ -1,14 +1,18 @@
-﻿using Silk.NET.Maths;
+﻿using Silk.NET.GLFW;
+using Silk.NET.Maths;
 using Silk.NET.Vulkan;
+using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
 using Vulkanize;
+using Image = Silk.NET.Vulkan.Image;
+using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace VkGuide;
 
 public class Engine
 {
 
-    private Vk _vk = Vulkanize.Vulkanize.Vk;
+    private readonly Vk _vk = Vulkanize.Vulkanize.Vk;
     private IWindow _window;
     private Instance _instance;
     private DebugUtilsMessengerEXT _debugMessenger;
@@ -18,6 +22,7 @@ public class Engine
     private Device _device;
 
     private SwapchainKHR _swapchain;
+    private KhrSwapchain _khrSwapchain;
     private Image[] _swapchainImages;
     private ImageView[] _swapchainImageViews;
     private Format _swapchainImageFormat;
@@ -33,6 +38,11 @@ public class Engine
     private RenderPass _renderPass;
     private Framebuffer[] _framebuffers;
 
+    private Semaphore _presentSemaphore;
+    private Semaphore _renderSemaphore;
+    private Fence _renderFence;
+
+    private int _frameNumber;
     private bool _isInitialized;
     
     public void Init()
@@ -41,13 +51,15 @@ public class Engine
         var options = WindowOptions.DefaultVulkan with
         {
             Title = "Vulkan Engine",
-            Size = new Vector2D<int>((int) _windowExtent.Width, (int) _windowExtent.Height)
+            Size = new Vector2D<int>((int) _windowExtent.Width, (int) _windowExtent.Height),
         };
         _window = Window.Create(options);
         _window.Initialize();
         InitVulkan();
         InitCommands();
         InitDefaultRenderPass();
+        InitFrameBuffers();
+        InitSyncStructures();
         _isInitialized = true;
     }
 
@@ -57,7 +69,7 @@ public class Engine
             .SetAppName("Example Vulkan Application")
             .UseRequiredWindowExtensions(_window)
             .EnableValidationLayers()
-            .RequireApiVersion(1, 1, 0)
+            .RequireApiVersion(Vk.Version11)
             .UseDefaultDebugMessenger()
             .Build();
         _instance = instanceInfo.Instance;
@@ -81,6 +93,7 @@ public class Engine
 
     private void InitSwapchain(DeviceInfo deviceInfo)
     {
+        _khrSwapchain = _vk.CheckKhrSwapchainExtension(_device);
         var swapchainInfo = new SwapchainBuilder(deviceInfo)
             .SetDesiredPresentMode(PresentModeKHR.FifoRelaxedKhr)
             .SetDesiredExtent(_windowExtent)
@@ -118,7 +131,7 @@ public class Engine
         var colorAttachmentRef = new AttachmentReference
         {
             Attachment = 0,
-            Layout = ImageLayout.AttachmentOptimal
+            Layout = ImageLayout.ColorAttachmentOptimal
         };
 
         var subpass = new SubpassDescription
@@ -138,11 +151,124 @@ public class Engine
         };
         _vk.CreateRenderPass(_device, renderPassInfo, null, out _renderPass);
     }
-    private void InitFrameBuffers(){}
+    private unsafe void InitFrameBuffers()
+    {
+        var fbInfo = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            PNext = null,
+            RenderPass = _renderPass,
+            AttachmentCount = 1,
+            Width = _windowExtent.Width,
+            Height = _windowExtent.Height,
+            Layers = 1
+        };
+        var swapchainImageCount = _swapchainImages.Length;
+        _framebuffers = new Framebuffer[swapchainImageCount];
+        for (var i = 0; i < swapchainImageCount; i++)
+        {
+            var attachment = _swapchainImageViews[i];
+            fbInfo.PAttachments = &attachment;
+            _vk.CreateFramebuffer(_device, fbInfo, null, out var framebuffer);
+            _framebuffers[i] = framebuffer;
+        }
+    }
+
+    private unsafe void InitSyncStructures()
+    {
+        var fenceInfo = new FenceCreateInfo
+        {
+            SType = StructureType.FenceCreateInfo,
+            PNext = null,
+            Flags = FenceCreateFlags.SignaledBit
+        };
+        _vk.CreateFence(_device, fenceInfo, null, out _renderFence);
+
+        var semaphoreInfo = new SemaphoreCreateInfo
+        {
+            SType = StructureType.SemaphoreCreateInfo,
+            PNext = null,
+            Flags = 0
+        };
+        _vk.CreateSemaphore(_device, semaphoreInfo, null, out _presentSemaphore);
+        _vk.CreateSemaphore(_device, semaphoreInfo, null, out _renderSemaphore);
+    }
     
     public void Run()
     {
+        _window.Render += Draw;
         _window.Run();
+        _vk.DeviceWaitIdle(_device);
+    }
+
+    private unsafe void Draw(double deltaTime)
+    {
+        _vk.WaitForFences(_device, 1, _renderFence, true, 1000000000);
+        _vk.ResetFences(_device, 1, _renderFence);
+        var swapchainImageIndex = 0U;
+        _khrSwapchain.AcquireNextImage(_device, _swapchain, 1000000000, _presentSemaphore, default,
+            ref swapchainImageIndex);
+        _vk.ResetCommandBuffer(_mainCommandBuffer, 0);
+        var cmd = _mainCommandBuffer;
+        var cmdBeginInfo = new CommandBufferBeginInfo
+        {
+            SType = StructureType.CommandBufferBeginInfo,
+            PNext = null,
+            PInheritanceInfo = null,
+            Flags = CommandBufferUsageFlags.OneTimeSubmitBit
+        };
+        _vk.BeginCommandBuffer(cmd, cmdBeginInfo);
+        var clearValue = new ClearValue();
+        var flash = MathF.Abs(MathF.Sin(_frameNumber / 120f));
+        clearValue.Color = new ClearColorValue(0, 0, flash, 0);
+
+        var rpInfo = new RenderPassBeginInfo
+        {
+            SType = StructureType.RenderPassBeginInfo,
+            PNext = null,
+            RenderPass = _renderPass,
+            RenderArea = {Offset = {X = 0, Y = 0}, Extent = _windowExtent},
+            Framebuffer = _framebuffers[swapchainImageIndex],
+            ClearValueCount = 1,
+            PClearValues = &clearValue
+        };
+        _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
+        
+        _vk.CmdEndRenderPass(cmd);
+        _vk.EndCommandBuffer(_mainCommandBuffer);
+        
+        var waitStage = PipelineStageFlags.ColorAttachmentOutputBit;
+        var waitSemaphore = _presentSemaphore;
+        var signalSemaphore = _renderSemaphore;
+        var submit = new SubmitInfo
+        {
+            SType = StructureType.SubmitInfo,
+            PNext = null,
+            PWaitDstStageMask = &waitStage,
+            WaitSemaphoreCount = 1,
+            PWaitSemaphores = &waitSemaphore,
+            SignalSemaphoreCount = 1,
+            PSignalSemaphores = &signalSemaphore,
+            CommandBufferCount = 1,
+            PCommandBuffers = &cmd
+        };
+        _vk.QueueSubmit(_graphicsQueue, 1, submit, _renderFence);
+
+        fixed (SwapchainKHR* swapchainPtr = &_swapchain)
+        {
+            var presentInfo = new PresentInfoKHR
+            {
+                SType = StructureType.PresentInfoKhr,
+                PNext = null,
+                SwapchainCount = 1,
+                PSwapchains = swapchainPtr,
+                WaitSemaphoreCount = 1,
+                PWaitSemaphores = &signalSemaphore,
+                PImageIndices = &swapchainImageIndex
+            };
+            _khrSwapchain.QueuePresent(_graphicsQueue, presentInfo);
+        }
+        _frameNumber++;
     }
 
     public unsafe void Terminate()
@@ -150,9 +276,15 @@ public class Engine
         if (!_isInitialized) return;
         
         _vk.DestroyCommandPool(_device, _commandPool, null);
-        
-        foreach (var view in _swapchainImageViews) 
-            _vk.DestroyImageView(_device, view, null);
+
+        for (var i = 0; i < _swapchainImageViews.Length; i++)
+        {
+            _vk.DestroyImageView(_device, _swapchainImageViews[i], null);
+            _vk.DestroyFramebuffer(_device, _framebuffers[i], null);
+        }
+        _vk.DestroyFence(_device, _renderFence, null);
+        _vk.DestroySemaphore(_device, _presentSemaphore, null);
+        _vk.DestroySemaphore(_device, _renderSemaphore, null);
         _vk.CheckKhrSwapchainExtension(_device).DestroySwapchain(_device, _swapchain, null);
         _vk.DestroyRenderPass(_device, _renderPass, null);
         _vk.DestroyDevice(_device, null);
