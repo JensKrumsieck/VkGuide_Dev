@@ -11,5 +11,21 @@
     <ItemGroup>
       <ProjectReference Include="..\Vulkanize\Vulkanize.csproj" />
     </ItemGroup>
+    <ItemGroup>
+        <ShaderDir Include="$(ProjectDir)\Shaders\**" />
+        <ShaderFiles Include="$(ProjectDir)**\*.spv" />
+    </ItemGroup>
 
+    <Target Name="CleanCompiledShaders" AfterTargets="Clean">
+        <Message Text="Clean Compiled Shaders \n@(ShaderFiles)" />
+        <Delete Files="@(ShaderFiles)" />
+    </Target>
+
+    <Target Name="CompileShaders" BeforeTargets="ResolveReferences">
+        <Message Text="Compile Shaders \n@(ShaderDir)@(VertexShader)" />
+        <Exec Command="glslc &quot;%(ShaderDir.FullPath)&quot; -o &quot;%(ShaderDir.FullPath).spv&quot;" Condition="'%(ShaderDir.Extension)' != '.spv'" />
+        <ItemGroup>
+            <EmbeddedResource Include="$(ProjectDir)**\*.spv" />
+        </ItemGroup>
+    </Target>
 </Project>

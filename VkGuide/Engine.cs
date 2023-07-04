@@ -1,9 +1,11 @@
 ﻿using Silk.NET.GLFW;
 using Silk.NET.Maths;
+using Silk.NET.OpenGL;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
 using Vulkanize;
+using Framebuffer = Silk.NET.Vulkan.Framebuffer;
 using Image = Silk.NET.Vulkan.Image;
 using Semaphore = Silk.NET.Vulkan.Semaphore;
 
@@ -60,6 +62,7 @@ public class Engine
         InitDefaultRenderPass();
         InitFrameBuffers();
         InitSyncStructures();
+        InitPipelines();
         _isInitialized = true;
     }
 
@@ -193,6 +196,29 @@ public class Engine
         _vk.CreateSemaphore(_device, semaphoreInfo, null, out _presentSemaphore);
         _vk.CreateSemaphore(_device, semaphoreInfo, null, out _renderSemaphore);
     }
+
+    private void InitPipelines()
+    {
+        if (!LoaderShaderModule("triangle.frag.spv", out var fragShader))
+            Console.WriteLine("Failed to load frag shader");
+        if(!LoaderShaderModule("triangle.vert.spv", out var vertShader))
+            Console.WriteLine("Failed to load vert shader");
+    }
+    
+    private unsafe bool LoaderShaderModule(string path, out ShaderModule shaderModule)
+    {
+        var shaderCode = Util.ReadBytesFromResource(path);
+        fixed(byte* shaderPtr = shaderCode)
+        {
+            var createInfo = new ShaderModuleCreateInfo
+            {
+                SType = StructureType.ShaderModuleCreateInfo,
+                CodeSize = (uint) shaderCode.Length,
+                PCode = (uint*) shaderPtr
+            };
+            return _vk.CreateShaderModule(_device, createInfo, null, out shaderModule) == Result.Success;
+        }
+    }
     
     public void Run()
     {
@@ -219,8 +245,10 @@ public class Engine
         };
         _vk.BeginCommandBuffer(cmd, cmdBeginInfo);
         var clearValue = new ClearValue();
-        var flash = MathF.Abs(MathF.Sin(_frameNumber / 120f));
-        clearValue.Color = new ClearColorValue(0, 0, flash, 0);
+        var flashB = MathF.Abs(MathF.Sin(_frameNumber / 120f));
+        var flashG = MathF.Abs(MathF.Sin(_frameNumber / 120f+.5f));
+        var flashR = MathF.Abs(MathF.Cos(_frameNumber / 120f));
+        clearValue.Color = new ClearColorValue(flashR, flashG, flashB, 0);
 
         var rpInfo = new RenderPassBeginInfo
         {
