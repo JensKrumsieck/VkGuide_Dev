@@ -1,6 +1,5 @@
-﻿using Silk.NET.GLFW;
+﻿using Silk.NET.Input;
 using Silk.NET.Maths;
-using Silk.NET.OpenGL;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
@@ -46,9 +45,11 @@ public class Engine
     private Fence _renderFence;
 
     private Pipeline _trianglePipeline;
+    private Pipeline _redTrianglePipeline;
     private PipelineLayout _trianglePipelineLayout;
 
     private int _frameNumber;
+    private int _selectedShader;
     private bool _isInitialized;
     
     public void Init()
@@ -207,6 +208,10 @@ public class Engine
             Console.WriteLine("Failed to load frag shader");
         if(!LoaderShaderModule("triangle.vert.spv", out var vertShader))
             Console.WriteLine("Failed to load vert shader");
+        if (!LoaderShaderModule("colored_triangle.frag.spv", out var coloredFragShader))
+            Console.WriteLine("Failed to load frag shader");
+        if(!LoaderShaderModule("colored_triangle.vert.spv", out var coloredVertShader))
+            Console.WriteLine("Failed to load vert shader");
 
         var layoutInfo = VkInit.PipelineLayoutCreateInfo();
         _vk.CreatePipelineLayout(_device, layoutInfo, null, out _trianglePipelineLayout);
@@ -215,8 +220,8 @@ public class Engine
         {
             ShaderStages = new[]
             {
-                VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, vertShader),
-                VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, fragShader)
+                VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, coloredVertShader),
+                VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, coloredFragShader)
             },
             VertexInputInfo = VkInit.VertexInputStateCreateInfo(),
             InputAssembly = VkInit.InputAssemblyCreateInfo(PrimitiveTopology.TriangleList),
@@ -237,6 +242,12 @@ public class Engine
         };
 
         _trianglePipeline = builder.Build(_device, _renderPass);
+        builder.ShaderStages = new[]
+        {
+            VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, vertShader),
+            VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, fragShader)
+        };
+        _redTrianglePipeline = builder.Build(_device, _renderPass);
     }
     
     private unsafe bool LoaderShaderModule(string path, out ShaderModule shaderModule)
@@ -257,6 +268,14 @@ public class Engine
     public void Run()
     {
         _window.Render += Draw;
+        var input = _window.CreateInput();
+        input.Keyboards[0].KeyDown += (keyboard, key, arg3) =>
+        {
+            if (key != Key.Space) return;
+            _selectedShader++;
+            if (_selectedShader > 1) _selectedShader = 0;
+            Console.WriteLine("Switching Shaders");
+        };
         _window.Run();
         _vk.DeviceWaitIdle(_device);
     }
@@ -295,7 +314,8 @@ public class Engine
             PClearValues = &clearValue
         };
         _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
-        _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _trianglePipeline);
+        _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics,
+            _selectedShader == 0 ? _trianglePipeline : _redTrianglePipeline);
         _vk.CmdDraw(cmd, 3, 1, 0, 0);
         _vk.CmdEndRenderPass(cmd);
         _vk.EndCommandBuffer(_mainCommandBuffer);
