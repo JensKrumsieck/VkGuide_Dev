@@ -15,6 +15,9 @@
         <ShaderDir Include="$(ProjectDir)\Shaders\**" />
         <ShaderFiles Include="$(ProjectDir)**\*.spv" />
     </ItemGroup>
+    <ItemGroup>
+      <PackageReference Include="hydos.VulkanMemoryAllocator" Version="1.0.0" />
+    </ItemGroup>
 
     <Target Name="CleanCompiledShaders" AfterTargets="Clean">
         <Message Text="Clean Compiled Shaders \n@(ShaderFiles)" />

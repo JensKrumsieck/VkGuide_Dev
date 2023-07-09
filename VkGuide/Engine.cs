@@ -4,6 +4,7 @@ using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
 using Vulkanize;
+using VMASharp;
 using Framebuffer = Silk.NET.Vulkan.Framebuffer;
 using Image = Silk.NET.Vulkan.Image;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
@@ -15,6 +16,8 @@ public class Engine
 {
 
     private readonly Vk _vk = Vulkanize.Vulkanize.Vk;
+    private VulkanMemoryAllocator _allocator;
+    
     private IWindow _window;
     private Instance _instance;
     private DebugUtilsMessengerEXT _debugMessenger;
@@ -104,6 +107,16 @@ public class Engine
         _graphicsQueueFamily = deviceInfo.QueueFamilies.GraphicsFamily!.Value;
         _graphicsQueue = deviceInfo.Queue;
         InitSwapchain(deviceInfo);
+
+        var createInfo = new VulkanMemoryAllocatorCreateInfo
+        {
+            VulkanAPIObject = _vk,
+            VulkanAPIVersion = Vk.Version11,
+            PhysicalDevice = _physicalDevice,
+            LogicalDevice = _device,
+            Instance = _instance
+        };
+        _allocator = new VulkanMemoryAllocator(createInfo);
     }
 
     private unsafe void InitSwapchain(DeviceInfo deviceInfo)
