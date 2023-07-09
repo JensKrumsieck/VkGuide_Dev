@@ -51,6 +51,8 @@ public class Engine
     private int _frameNumber;
     private int _selectedShader;
     private bool _isInitialized;
+
+    private DeletionQueue _mainDeletionQueue = new();
     
     public void Init()
     {
@@ -62,6 +64,7 @@ public class Engine
         };
         _window = Window.Create(options);
         _window.Initialize();
+        _mainDeletionQueue.Queue(() => _window.Dispose());
         InitVulkan();
         InitCommands();
         InitDefaultRenderPass();
@@ -71,7 +74,7 @@ public class Engine
         _isInitialized = true;
     }
 
-    private void InitVulkan()
+    private unsafe void InitVulkan()
     {
         var instanceInfo = new InstanceBuilder()
             .SetAppName("Example Vulkan Application")
@@ -81,8 +84,11 @@ public class Engine
             .UseDefaultDebugMessenger()
             .Build();
         _instance = instanceInfo.Instance;
+        _mainDeletionQueue.Queue(() => _vk.DestroyInstance(_instance, null));
         _debugMessenger = instanceInfo.DebugMessenger!.Value;
+        _mainDeletionQueue.Queue(() => _vk.CheckExtDebugUtils().DestroyDebugUtilsMessenger(_instance, _debugMessenger, null));
         _surface = instanceInfo.CreateSurface(_window);
+        _mainDeletionQueue.Queue(() => _vk.CheckKhrSurfaceExtension().DestroySurface(_instance, _surface, null));
 
         var physicalDeviceInfo = new PhysicalDeviceSelector()
             .SetSurface(_surface)
@@ -94,12 +100,13 @@ public class Engine
             .EnableValidationLayers()
             .Build();
         _device = deviceInfo.Device;
+        _mainDeletionQueue.Queue(() => _vk.DestroyDevice(_device, null));
         _graphicsQueueFamily = deviceInfo.QueueFamilies.GraphicsFamily!.Value;
         _graphicsQueue = deviceInfo.Queue;
         InitSwapchain(deviceInfo);
     }
 
-    private void InitSwapchain(DeviceInfo deviceInfo)
+    private unsafe void InitSwapchain(DeviceInfo deviceInfo)
     {
         _khrSwapchain = _vk.CheckKhrSwapchainExtension(_device);
         var swapchainInfo = new SwapchainBuilder(deviceInfo)
@@ -108,6 +115,7 @@ public class Engine
             .UseDefaultFormat()
             .Build();
         _swapchain = swapchainInfo.Swapchain;
+        _mainDeletionQueue.Queue(()=> _khrSwapchain.DestroySwapchain(_device, _swapchain, null));
         _swapchainImages = swapchainInfo.Images;
         _swapchainImageViews = swapchainInfo.ImageViews;
         _swapchainImageFormat = swapchainInfo.Format;
@@ -117,7 +125,7 @@ public class Engine
     {
         var commandPoolInfo = VkInit.CommandPoolCreateInfo(_graphicsQueueFamily);
         _vk.CreateCommandPool(_device, commandPoolInfo, null, out _commandPool);
-
+        _mainDeletionQueue.Queue(() => _vk.DestroyCommandPool(_device, _commandPool, null));
         var cmdAllocInfo = VkInit.CommandBufferAllocateInfo(_commandPool);
         _vk.AllocateCommandBuffers(_device, cmdAllocInfo, out _mainCommandBuffer);
     }
@@ -158,6 +166,7 @@ public class Engine
             PSubpasses = &subpass
         };
         _vk.CreateRenderPass(_device, renderPassInfo, null, out _renderPass);
+        _mainDeletionQueue.Queue(() => _vk.DestroyRenderPass(_device, _renderPass, null));
     }
     private unsafe void InitFrameBuffers()
     {
@@ -179,43 +188,42 @@ public class Engine
             fbInfo.PAttachments = &attachment;
             _vk.CreateFramebuffer(_device, fbInfo, null, out var framebuffer);
             _framebuffers[i] = framebuffer;
+            var view = _swapchainImageViews[i];
+            _mainDeletionQueue.Queue(() => _vk.DestroyFramebuffer(_device, framebuffer, null));
+            _mainDeletionQueue.Queue(() => _vk.DestroyImageView(_device, view, null));
         }
     }
 
     private unsafe void InitSyncStructures()
     {
-        var fenceInfo = new FenceCreateInfo
-        {
-            SType = StructureType.FenceCreateInfo,
-            PNext = null,
-            Flags = FenceCreateFlags.SignaledBit
-        };
+        var fenceInfo = VkInit.FenceCreateInfo(FenceCreateFlags.SignaledBit);
         _vk.CreateFence(_device, fenceInfo, null, out _renderFence);
-
-        var semaphoreInfo = new SemaphoreCreateInfo
-        {
-            SType = StructureType.SemaphoreCreateInfo,
-            PNext = null,
-            Flags = 0
-        };
+        _mainDeletionQueue.Queue(() => _vk.DestroyFence(_device, _renderFence, null));
+        var semaphoreInfo = VkInit.SemaphoreCreateInfo();
         _vk.CreateSemaphore(_device, semaphoreInfo, null, out _presentSemaphore);
+        _mainDeletionQueue.Queue(() => _vk.DestroySemaphore(_device, _presentSemaphore, null));
         _vk.CreateSemaphore(_device, semaphoreInfo, null, out _renderSemaphore);
+        _mainDeletionQueue.Queue(() => _vk.DestroySemaphore(_device, _renderSemaphore, null));
     }
 
     private unsafe void InitPipelines()
     {
         if (!LoaderShaderModule("triangle.frag.spv", out var fragShader))
             Console.WriteLine("Failed to load frag shader");
+        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, fragShader, null));
         if(!LoaderShaderModule("triangle.vert.spv", out var vertShader))
             Console.WriteLine("Failed to load vert shader");
+        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, vertShader, null));
         if (!LoaderShaderModule("colored_triangle.frag.spv", out var coloredFragShader))
             Console.WriteLine("Failed to load frag shader");
+        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, coloredFragShader, null));
         if(!LoaderShaderModule("colored_triangle.vert.spv", out var coloredVertShader))
             Console.WriteLine("Failed to load vert shader");
-
+        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, coloredVertShader, null));
+        
         var layoutInfo = VkInit.PipelineLayoutCreateInfo();
         _vk.CreatePipelineLayout(_device, layoutInfo, null, out _trianglePipelineLayout);
-
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, _trianglePipelineLayout, null));
         var builder = new PipelineBuilder
         {
             ShaderStages = new[]
@@ -242,12 +250,14 @@ public class Engine
         };
 
         _trianglePipeline = builder.Build(_device, _renderPass);
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _trianglePipeline, null));
         builder.ShaderStages = new[]
         {
             VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, vertShader),
             VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, fragShader)
         };
         _redTrianglePipeline = builder.Build(_device, _renderPass);
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _redTrianglePipeline, null));
     }
     
     private unsafe bool LoaderShaderModule(string path, out ShaderModule shaderModule)
@@ -354,28 +364,9 @@ public class Engine
         _frameNumber++;
     }
 
-    public unsafe void Terminate()
+    public void Terminate()
     {
         if (!_isInitialized) return;
-        
-        _vk.DestroyCommandPool(_device, _commandPool, null);
-
-        for (var i = 0; i < _swapchainImageViews.Length; i++)
-        {
-            _vk.DestroyImageView(_device, _swapchainImageViews[i], null);
-            _vk.DestroyFramebuffer(_device, _framebuffers[i], null);
-        }
-        _vk.DestroyPipeline(_device, _trianglePipeline, null);
-        _vk.DestroyPipelineLayout(_device, _trianglePipelineLayout, null);
-        _vk.DestroyFence(_device, _renderFence, null);
-        _vk.DestroySemaphore(_device, _presentSemaphore, null);
-        _vk.DestroySemaphore(_device, _renderSemaphore, null);
-        _vk.CheckKhrSwapchainExtension(_device).DestroySwapchain(_device, _swapchain, null);
-        _vk.DestroyRenderPass(_device, _renderPass, null);
-        _vk.DestroyDevice(_device, null);
-        _vk.CheckKhrSurfaceExtension().DestroySurface(_instance, _surface, null);
-        _vk.CheckExtDebugUtils().DestroyDebugUtilsMessenger(_instance, _debugMessenger, null);
-        _vk.DestroyInstance(_instance, null);
-        _window.Dispose();
+        _mainDeletionQueue.Flush();
     }
 }

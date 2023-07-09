@@ -130,4 +130,26 @@ public static class VkInit
         };
         return info;
     }
+
+    public static FenceCreateInfo FenceCreateInfo(FenceCreateFlags flags = 0)
+    {
+        var info = new FenceCreateInfo
+        {
+            SType = StructureType.FenceCreateInfo,
+            PNext = null,
+            Flags = flags
+        };
+        return info;
+    }
+
+    public static SemaphoreCreateInfo SemaphoreCreateInfo(SemaphoreCreateFlags flags = 0)
+    {
+        var info = new SemaphoreCreateInfo
+        {
+            SType = StructureType.SemaphoreCreateInfo,
+            PNext = null,
+            Flags = flags
+        };
+        return info;
+    }
 }
