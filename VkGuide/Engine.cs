@@ -345,6 +345,8 @@ public class Engine
             _vk.DestroyImageView(_device, _swapchainImageViews[i], null);
             _vk.DestroyFramebuffer(_device, _framebuffers[i], null);
         }
+        _vk.DestroyPipeline(_device, _trianglePipeline, null);
+        _vk.DestroyPipelineLayout(_device, _trianglePipelineLayout, null);
         _vk.DestroyFence(_device, _renderFence, null);
         _vk.DestroySemaphore(_device, _presentSemaphore, null);
         _vk.DestroySemaphore(_device, _renderSemaphore, null);
