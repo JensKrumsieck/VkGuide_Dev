@@ -7,6 +7,7 @@ using Silk.NET.Windowing;
 using Vulkanize;
 using Framebuffer = Silk.NET.Vulkan.Framebuffer;
 using Image = Silk.NET.Vulkan.Image;
+using PolygonMode = Silk.NET.Vulkan.PolygonMode;
 using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace VkGuide;
@@ -43,6 +44,9 @@ public class Engine
     private Semaphore _presentSemaphore;
     private Semaphore _renderSemaphore;
     private Fence _renderFence;
+
+    private Pipeline _trianglePipeline;
+    private PipelineLayout _trianglePipelineLayout;
 
     private int _frameNumber;
     private bool _isInitialized;
@@ -197,12 +201,42 @@ public class Engine
         _vk.CreateSemaphore(_device, semaphoreInfo, null, out _renderSemaphore);
     }
 
-    private void InitPipelines()
+    private unsafe void InitPipelines()
     {
         if (!LoaderShaderModule("triangle.frag.spv", out var fragShader))
             Console.WriteLine("Failed to load frag shader");
         if(!LoaderShaderModule("triangle.vert.spv", out var vertShader))
             Console.WriteLine("Failed to load vert shader");
+
+        var layoutInfo = VkInit.PipelineLayoutCreateInfo();
+        _vk.CreatePipelineLayout(_device, layoutInfo, null, out _trianglePipelineLayout);
+
+        var builder = new PipelineBuilder
+        {
+            ShaderStages = new[]
+            {
+                VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, vertShader),
+                VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, fragShader)
+            },
+            VertexInputInfo = VkInit.VertexInputStateCreateInfo(),
+            InputAssembly = VkInit.InputAssemblyCreateInfo(PrimitiveTopology.TriangleList),
+            Viewport = new Viewport
+            {
+                X = 0f,
+                Y = 0f,
+                Width = _windowExtent.Width,
+                Height = _windowExtent.Height,
+                MinDepth = 0f,
+                MaxDepth = 1f
+            },
+            Scissor = new Rect2D(new Offset2D(0, 0), _windowExtent),
+            Rasterizer = VkInit.RasterizationStateCreateInfo(PolygonMode.Fill),
+            Multisampling = VkInit.MultisampleStateCreateInfo(),
+            ColorBlendAttachment = VkInit.ColorBlendAttachmentState(),
+            PipelineLayout = _trianglePipelineLayout
+        };
+
+        _trianglePipeline = builder.Build(_device, _renderPass);
     }
     
     private unsafe bool LoaderShaderModule(string path, out ShaderModule shaderModule)
@@ -261,7 +295,8 @@ public class Engine
             PClearValues = &clearValue
         };
         _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
-        
+        _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _trianglePipeline);
+        _vk.CmdDraw(cmd, 3, 1, 0, 0);
         _vk.CmdEndRenderPass(cmd);
         _vk.EndCommandBuffer(_mainCommandBuffer);
         
