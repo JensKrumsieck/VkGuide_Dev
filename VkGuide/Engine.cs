@@ -1,6 +1,7 @@
 ﻿using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Silk.NET.Core.Native;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Vulkan;
@@ -56,6 +57,7 @@ public class Engine
     private Pipeline _redTrianglePipeline;
     private Pipeline _meshPipeline;
     private PipelineLayout _trianglePipelineLayout;
+    private PipelineLayout _meshPipelineLayout;
 
     private Mesh _triangleMesh;
     
@@ -247,6 +249,14 @@ public class Engine
         var layoutInfo = VkInit.PipelineLayoutCreateInfo();
         _vk.CreatePipelineLayout(_device, layoutInfo, null, out _trianglePipelineLayout);
         _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, _trianglePipelineLayout, null));
+
+        var pushConstant =
+            new PushConstantRange(ShaderStageFlags.VertexBit, 0, (uint) Unsafe.SizeOf<MeshPushConstants>());
+        layoutInfo.PPushConstantRanges = &pushConstant;
+        layoutInfo.PushConstantRangeCount = 1;
+        _vk.CreatePipelineLayout(_device, layoutInfo, null, out _meshPipelineLayout);
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, _meshPipelineLayout, null));
+        
         var builder = new PipelineBuilder
         {
             ShaderStages = new[]
@@ -299,6 +309,7 @@ public class Engine
             VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, triVertShader),
             VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, coloredFragShader)
         };
+        builder.PipelineLayout = _meshPipelineLayout;
         _meshPipeline = builder.Build(_device, _renderPass);
         _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _meshPipeline, null));
     }
@@ -412,6 +423,18 @@ public class Engine
         ulong offset = 0;
         var vertBuffer = _triangleMesh.VertexBuffer.Buffer;
         _vk.CmdBindVertexBuffers(cmd, 0, 1, &vertBuffer, &offset);
+        var camPos = new Vector3(0, 0, -2);
+        var view = Matrix4x4.CreateTranslation(camPos);
+        var projection = Matrix4x4.CreatePerspectiveFieldOfView(70 * MathF.PI / 180, 1700f / 900f, 0.1f, 200.0f);
+        projection = projection with {M11 = projection.M11-1};
+        var model = Matrix4x4.CreateRotationY(_frameNumber * .4f * MathF.PI / 180);
+        model = Matrix4x4.Transpose(model);
+        var meshMatrix = projection * view * model;
+        
+        var constants = new MeshPushConstants { RenderMatrix = meshMatrix };
+        _vk.CmdPushConstants(cmd, _meshPipelineLayout, ShaderStageFlags.VertexBit, 0,
+            (uint)Unsafe.SizeOf<MeshPushConstants>(), &constants);
+        
         _vk.CmdDraw(cmd, (uint)_triangleMesh.Vertices.Length, 1, 0, 0);
         _vk.CmdEndRenderPass(cmd);
         _vk.EndCommandBuffer(_mainCommandBuffer);
