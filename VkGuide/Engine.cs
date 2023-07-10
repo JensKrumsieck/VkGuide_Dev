@@ -1,10 +1,15 @@
-﻿using Silk.NET.Input;
+﻿using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
+using VkGuide.Types;
 using Vulkanize;
 using VMASharp;
+using Buffer = Silk.NET.Vulkan.Buffer;
 using Framebuffer = Silk.NET.Vulkan.Framebuffer;
 using Image = Silk.NET.Vulkan.Image;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
@@ -49,10 +54,13 @@ public class Engine
 
     private Pipeline _trianglePipeline;
     private Pipeline _redTrianglePipeline;
+    private Pipeline _meshPipeline;
     private PipelineLayout _trianglePipelineLayout;
 
+    private Mesh _triangleMesh;
+    
     private int _frameNumber;
-    private int _selectedShader;
+    private int _selectedPipeline;
     private bool _isInitialized;
 
     private DeletionQueue _mainDeletionQueue = new();
@@ -74,6 +82,7 @@ public class Engine
         InitFrameBuffers();
         InitSyncStructures();
         InitPipelines();
+        LoadMeshes();
         _isInitialized = true;
     }
 
@@ -117,6 +126,7 @@ public class Engine
             Instance = _instance
         };
         _allocator = new VulkanMemoryAllocator(createInfo);
+        _mainDeletionQueue.Queue(() => _allocator.Dispose());
     }
 
     private unsafe void InitSwapchain(DeviceInfo deviceInfo)
@@ -271,6 +281,26 @@ public class Engine
         };
         _redTrianglePipeline = builder.Build(_device, _renderPass);
         _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _redTrianglePipeline, null));
+
+        var vertexDescription = Vertex.GetVertexDescription();
+        fixed (VertexInputAttributeDescription* attributesPtr = vertexDescription.Attributes)
+            builder.VertexInputInfo.PVertexAttributeDescriptions = attributesPtr;
+        builder.VertexInputInfo.VertexAttributeDescriptionCount = (uint) vertexDescription.Attributes.Length;
+        fixed (VertexInputBindingDescription* bindingsPtr = vertexDescription.Bindings)
+            builder.VertexInputInfo.PVertexBindingDescriptions = bindingsPtr;
+        builder.VertexInputInfo.VertexBindingDescriptionCount = (uint) vertexDescription.Bindings.Length;
+        
+        if (!LoaderShaderModule("tri_mesh.vert.spv", out var triVertShader))
+            Console.WriteLine("Failed to load tri vert shader");
+        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, triVertShader, null));
+
+        builder.ShaderStages = new[]
+        {
+            VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, triVertShader),
+            VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, coloredFragShader)
+        };
+        _meshPipeline = builder.Build(_device, _renderPass);
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _meshPipeline, null));
     }
     
     private unsafe bool LoaderShaderModule(string path, out ShaderModule shaderModule)
@@ -287,6 +317,47 @@ public class Engine
             return _vk.CreateShaderModule(_device, createInfo, null, out shaderModule) == Result.Success;
         }
     }
+
+    private void LoadMeshes()
+    {
+        var vertices = new Vertex[]
+        {
+            new() {Position = new Vector3(1, 1, 0), Color = new Vector3(0, 1, 0)},
+            new() {Position = new Vector3(-1, 1, 0), Color = new Vector3(0, 1, 0)},
+            new() {Position = new Vector3(0,-1,0), Color = new Vector3(0,1,0)}
+        };
+        _triangleMesh = new Mesh {Vertices = vertices};
+        UploadMesh(_triangleMesh);
+    }
+
+    private unsafe void UploadMesh(Mesh mesh)
+    {
+        CreateBuffer<Vertex>(mesh.Vertices, out var buffer, out var allocation);
+        mesh.VertexBuffer = new AllocatedBuffer { Allocation = allocation, Buffer = buffer};
+        _mainDeletionQueue.Queue(() => _vk.DestroyBuffer(_device, buffer, null));
+        _mainDeletionQueue.Queue(() => allocation.Dispose());
+    }
+
+    private void CreateBuffer<T>(ReadOnlySpan<T> span, out Buffer buffer, out Allocation allocation)
+        where T : unmanaged
+    {
+        var bufferInfo = new BufferCreateInfo
+        {
+            SType = StructureType.BufferCreateInfo,
+            Size = (uint)span.Length * (uint)Unsafe.SizeOf<T>(),
+            Usage = BufferUsageFlags.VertexBufferBit
+        };
+        var allocInfo = new AllocationCreateInfo
+        {
+            Flags = AllocationCreateFlags.Mapped,
+            Usage = MemoryUsage.CPU_To_GPU
+        };
+        buffer = _allocator.CreateBuffer(in bufferInfo, in allocInfo, out allocation); 
+        
+        if (!allocation.TryGetSpan(out Span<T> bufferSpan))
+            throw new InvalidOperationException("Unable to get Span<T> to mapped allocation.");
+        span.CopyTo(bufferSpan);
+    }
     
     public void Run()
     {
@@ -295,8 +366,8 @@ public class Engine
         input.Keyboards[0].KeyDown += (keyboard, key, arg3) =>
         {
             if (key != Key.Space) return;
-            _selectedShader++;
-            if (_selectedShader > 1) _selectedShader = 0;
+            _selectedPipeline++;
+            if (_selectedPipeline > 2) _selectedPipeline = 0;
             Console.WriteLine("Switching Shaders");
         };
         _window.Run();
@@ -337,9 +408,11 @@ public class Engine
             PClearValues = &clearValue
         };
         _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
-        _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics,
-            _selectedShader == 0 ? _trianglePipeline : _redTrianglePipeline);
-        _vk.CmdDraw(cmd, 3, 1, 0, 0);
+        _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _meshPipeline);
+        ulong offset = 0;
+        var vertBuffer = _triangleMesh.VertexBuffer.Buffer;
+        _vk.CmdBindVertexBuffers(cmd, 0, 1, &vertBuffer, &offset);
+        _vk.CmdDraw(cmd, (uint)_triangleMesh.Vertices.Length, 1, 0, 0);
         _vk.CmdEndRenderPass(cmd);
         _vk.EndCommandBuffer(_mainCommandBuffer);
         
