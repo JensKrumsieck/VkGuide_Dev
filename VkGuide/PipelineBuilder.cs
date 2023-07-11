@@ -13,6 +13,7 @@ public class PipelineBuilder
     public PipelineColorBlendAttachmentState ColorBlendAttachment;
     public PipelineMultisampleStateCreateInfo Multisampling;
     public PipelineLayout PipelineLayout;
+    public PipelineDepthStencilStateCreateInfo DepthStencil;
     
     public unsafe Pipeline Build(Device device, RenderPass pass)
     {
@@ -23,6 +24,7 @@ public class PipelineBuilder
         var inputAssembly = InputAssembly;
         var rasterizer = Rasterizer;
         var multisampling = Multisampling;
+        var depthStencil = DepthStencil;
         
         var viewportState = new PipelineViewportStateCreateInfo
         {
@@ -57,7 +59,8 @@ public class PipelineBuilder
                 PColorBlendState = &colorBlending,
                 Layout = PipelineLayout,
                 RenderPass = pass,
-                BasePipelineHandle = default
+                BasePipelineHandle = default,
+                PDepthStencilState = &depthStencil
             };
             if (Vulkanize.Vulkanize.Vk.CreateGraphicsPipelines(device, default, 1, pipelineInfo, null,
                     out var pipeline) !=

@@ -19,7 +19,6 @@ namespace VkGuide;
 
 public class Engine
 {
-
     private readonly Vk _vk = Vulkanize.Vulkanize.Vk;
     private VulkanMemoryAllocator _allocator;
     
@@ -37,6 +36,10 @@ public class Engine
     private ImageView[] _swapchainImageViews;
     private Format _swapchainImageFormat;
 
+    private ImageView _depthImageView;
+    private AllocatedImage _depthImage;
+    private Format _depthFormat;
+    
     private Extent2D _windowExtent = new(1700, 900);
 
     private Queue _graphicsQueue;
@@ -117,8 +120,7 @@ public class Engine
         _mainDeletionQueue.Queue(() => _vk.DestroyDevice(_device, null));
         _graphicsQueueFamily = deviceInfo.QueueFamilies.GraphicsFamily!.Value;
         _graphicsQueue = deviceInfo.Queue;
-        InitSwapchain(deviceInfo);
-
+        
         var createInfo = new VulkanMemoryAllocatorCreateInfo
         {
             VulkanAPIObject = _vk,
@@ -129,6 +131,8 @@ public class Engine
         };
         _allocator = new VulkanMemoryAllocator(createInfo);
         _mainDeletionQueue.Queue(() => _allocator.Dispose());
+        
+        InitSwapchain(deviceInfo);
     }
 
     private unsafe void InitSwapchain(DeviceInfo deviceInfo)
@@ -144,6 +148,26 @@ public class Engine
         _swapchainImages = swapchainInfo.Images;
         _swapchainImageViews = swapchainInfo.ImageViews;
         _swapchainImageFormat = swapchainInfo.Format;
+
+        var depthImageExtent = new Extent3D(_windowExtent.Width, _windowExtent.Height, 1);
+        _depthFormat = Format.D32Sfloat;
+        var dimgInfo =
+            VkInit.ImageCreateInfo(_depthFormat, ImageUsageFlags.DepthStencilAttachmentBit, depthImageExtent);
+        var dimgAllocInfo = new AllocationCreateInfo
+        {
+            Usage = MemoryUsage.GPU_Only,
+            RequiredFlags = MemoryPropertyFlags.DeviceLocalBit
+        };
+        var image = _allocator.CreateImage(dimgInfo, dimgAllocInfo, out var allocation);
+        _depthImage = new AllocatedImage {Image = image, Allocation = allocation};
+        var dviewInfo = VkInit.ImageViewCreateInfo(_depthFormat, _depthImage.Image, ImageAspectFlags.DepthBit);
+        _vk.CreateImageView(_device, dviewInfo, null, out _depthImageView);
+        _mainDeletionQueue.Queue(() =>
+        {
+            _vk.DestroyImageView(_device, _depthImageView, null);
+            _vk.DestroyImage(_device, _depthImage.Image, null);
+            allocation.Dispose();
+        });
     }
 
     private unsafe void InitCommands()
@@ -175,23 +199,73 @@ public class Engine
             Layout = ImageLayout.ColorAttachmentOptimal
         };
 
+        var depthAttachment = new AttachmentDescription
+        {
+            Format = _depthFormat,
+            Flags = 0,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Clear,
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.Clear,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
+            FinalLayout = ImageLayout.DepthStencilAttachmentOptimal
+        };
+
+        var depthAttachmentRef = new AttachmentReference
+        {
+            Attachment = 1,
+            Layout = ImageLayout.DepthStencilAttachmentOptimal
+        };
+
         var subpass = new SubpassDescription
         {
             PipelineBindPoint = PipelineBindPoint.Graphics,
             ColorAttachmentCount = 1,
-            PColorAttachments = &colorAttachmentRef
+            PColorAttachments = &colorAttachmentRef,
+            PDepthStencilAttachment = &depthAttachmentRef
         };
 
-        var renderPassInfo = new RenderPassCreateInfo
+        var attachments = new[]
         {
-            SType = StructureType.RenderPassCreateInfo,
-            AttachmentCount = 1,
-            PAttachments = &colorAttachment,
-            SubpassCount = 1,
-            PSubpasses = &subpass
+            colorAttachment,
+            depthAttachment
         };
-        _vk.CreateRenderPass(_device, renderPassInfo, null, out _renderPass);
-        _mainDeletionQueue.Queue(() => _vk.DestroyRenderPass(_device, _renderPass, null));
+        var dependency = new SubpassDependency
+        {
+            SrcSubpass = Vk.SubpassExternal,
+            DstSubpass = 0,
+            SrcStageMask = PipelineStageFlags.ColorAttachmentOutputBit,
+            SrcAccessMask = 0,
+            DstStageMask = PipelineStageFlags.ColorAttachmentOutputBit,
+            DstAccessMask = AccessFlags.ColorAttachmentWriteBit
+        };
+        var depthDependency = new SubpassDependency
+        {
+            SrcSubpass = Vk.SubpassExternal,
+            DstSubpass = 0,
+            SrcStageMask = PipelineStageFlags.EarlyFragmentTestsBit | PipelineStageFlags.LateFragmentTestsBit,
+            SrcAccessMask = 0,
+            DstStageMask = PipelineStageFlags.EarlyFragmentTestsBit | PipelineStageFlags.LateFragmentTestsBit,
+            DstAccessMask = AccessFlags.DepthStencilAttachmentWriteBit
+        };
+        var dependencies = new[] {dependency, depthDependency};
+        fixed (AttachmentDescription* attachmentPtr = attachments)
+        fixed (SubpassDependency* dependencyPtr = dependencies)
+        {
+            var renderPassInfo = new RenderPassCreateInfo
+            {
+                SType = StructureType.RenderPassCreateInfo,
+                AttachmentCount = (uint)attachments.Length,
+                PAttachments = attachmentPtr,
+                SubpassCount = 1,
+                PSubpasses = &subpass,
+                DependencyCount = (uint)dependencies.Length,
+                PDependencies = dependencyPtr
+            };
+            _vk.CreateRenderPass(_device, renderPassInfo, null, out _renderPass);
+            _mainDeletionQueue.Queue(() => _vk.DestroyRenderPass(_device, _renderPass, null));
+        }
     }
     private unsafe void InitFrameBuffers()
     {
@@ -209,8 +283,11 @@ public class Engine
         _framebuffers = new Framebuffer[swapchainImageCount];
         for (var i = 0; i < swapchainImageCount; i++)
         {
-            var attachment = _swapchainImageViews[i];
-            fbInfo.PAttachments = &attachment;
+            var attachments = new[] {_swapchainImageViews[i], _depthImageView};
+            fixed(ImageView* attachmentPtr = attachments)
+                fbInfo.PAttachments = attachmentPtr;
+            fbInfo.AttachmentCount = (uint)attachments.Length;
+            
             _vk.CreateFramebuffer(_device, fbInfo, null, out var framebuffer);
             _framebuffers[i] = framebuffer;
             var view = _swapchainImageViews[i];
@@ -279,7 +356,8 @@ public class Engine
             Rasterizer = VkInit.RasterizationStateCreateInfo(PolygonMode.Fill),
             Multisampling = VkInit.MultisampleStateCreateInfo(),
             ColorBlendAttachment = VkInit.ColorBlendAttachmentState(),
-            PipelineLayout = _trianglePipelineLayout
+            PipelineLayout = _trianglePipelineLayout,
+            DepthStencil = VkInit.DepthStencilCreateInfo(true, true, CompareOp.LessOrEqual)
         };
 
         _trianglePipeline = builder.Build(_device, _renderPass);
@@ -412,17 +490,23 @@ public class Engine
         var flashR = MathF.Abs(MathF.Cos(_frameNumber / 120f));
         clearValue.Color = new ClearColorValue(flashR, flashG, flashB, 0);
 
-        var rpInfo = new RenderPassBeginInfo
+        var depthClear = new ClearValue {DepthStencil = {Depth = 1}};
+        var clearValues = new[] {clearValue, depthClear};
+        fixed (ClearValue* clearValuePtr = clearValues)
         {
-            SType = StructureType.RenderPassBeginInfo,
-            PNext = null,
-            RenderPass = _renderPass,
-            RenderArea = {Offset = {X = 0, Y = 0}, Extent = _windowExtent},
-            Framebuffer = _framebuffers[swapchainImageIndex],
-            ClearValueCount = 1,
-            PClearValues = &clearValue
-        };
-        _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
+            var rpInfo = new RenderPassBeginInfo
+            {
+                SType = StructureType.RenderPassBeginInfo,
+                PNext = null,
+                RenderPass = _renderPass,
+                RenderArea = {Offset = {X = 0, Y = 0}, Extent = _windowExtent},
+                Framebuffer = _framebuffers[swapchainImageIndex],
+                ClearValueCount = (uint) clearValues.Length,
+                PClearValues = clearValuePtr
+            };
+            _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
+        }
+
         _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _meshPipeline);
         ulong offset = 0; 
         var vertBuffer = _monkeyMesh.VertexBuffer.Buffer;

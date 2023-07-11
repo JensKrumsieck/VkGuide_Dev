@@ -152,4 +152,54 @@ public static class VkInit
         };
         return info;
     }
+
+    public static ImageCreateInfo ImageCreateInfo(Format format, ImageUsageFlags usageFlags, Extent3D extent)
+    {
+        var info = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo,
+            PNext = null,
+            ImageType = ImageType.Type2D,
+            Format = format,
+            Extent = extent,
+            MipLevels = 1,
+            ArrayLayers = 1,
+            Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal,
+            Usage = usageFlags
+        };
+        return info;
+    }
+
+    public static ImageViewCreateInfo ImageViewCreateInfo(Format format, Image image, ImageAspectFlags aspectFlags)
+    {
+        var info = new ImageViewCreateInfo
+        {
+            SType = StructureType.ImageViewCreateInfo,
+            PNext = null,
+            ViewType = ImageViewType.Type2D,
+            Image = image,
+            Format = format,
+            SubresourceRange = new ImageSubresourceRange(aspectFlags, 0, 1, 0, 1)
+        };
+        return info;
+    }
+
+    public static PipelineDepthStencilStateCreateInfo DepthStencilCreateInfo(bool bDepthTest, bool bDepthWrite,
+        CompareOp compareOp)
+    {
+        var info = new PipelineDepthStencilStateCreateInfo
+        {
+            SType = StructureType.PipelineDepthStencilStateCreateInfo,
+            PNext = null,
+            DepthTestEnable = bDepthTest,
+            DepthWriteEnable = bDepthWrite,
+            DepthCompareOp = bDepthTest ? compareOp : CompareOp.Always,
+            DepthBoundsTestEnable = false,
+            MinDepthBounds = 0,
+            MaxDepthBounds = 1,
+            StencilTestEnable = false
+        };
+        return info;
+    }
 }
