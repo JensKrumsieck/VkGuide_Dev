@@ -16,6 +16,7 @@
         <ShaderFiles Include="$(ProjectDir)**\*.spv" />
     </ItemGroup>
     <ItemGroup>
+      <PackageReference Include="GlmSharp" Version="0.9.8" />
       <PackageReference Include="hydos.VulkanMemoryAllocator" Version="1.0.0" />
     </ItemGroup>
 

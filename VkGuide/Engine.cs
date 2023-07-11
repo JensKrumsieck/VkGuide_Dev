@@ -1,7 +1,6 @@
 ﻿using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using Silk.NET.Core.Native;
+using GlmSharp;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Vulkan;
@@ -38,7 +37,7 @@ public class Engine
     private ImageView[] _swapchainImageViews;
     private Format _swapchainImageFormat;
 
-    private Extent2D _windowExtent = new(1440, 900);
+    private Extent2D _windowExtent = new(1700, 900);
 
     private Queue _graphicsQueue;
     private uint _graphicsQueueFamily;
@@ -423,14 +422,15 @@ public class Engine
         ulong offset = 0;
         var vertBuffer = _triangleMesh.VertexBuffer.Buffer;
         _vk.CmdBindVertexBuffers(cmd, 0, 1, &vertBuffer, &offset);
-        var camPos = new Vector3(0, 0, -2);
-        var view = Matrix4x4.CreateTranslation(camPos);
-        var projection = Matrix4x4.CreatePerspectiveFieldOfView(70 * MathF.PI / 180, 1700f / 900f, 0.1f, 200.0f);
-        projection = projection with {M11 = projection.M11-1};
-        var model = Matrix4x4.CreateRotationY(_frameNumber * .4f * MathF.PI / 180);
-        model = Matrix4x4.Transpose(model);
+        var camPos = new vec3(0, 0, -2f);
+        var view = mat4.Translate(camPos);
+        var projection = mat4.Perspective(70 * (MathF.PI / 180),
+                                                                (_windowExtent.Width / (float) _windowExtent.Height),
+                                                                .1f,
+                                                                200f);
+        projection = projection with {m11 = projection.m11 * -1};
+        var model = mat4.Rotate(_frameNumber * .4f * (MathF.PI / 180), vec3.UnitY);
         var meshMatrix = projection * view * model;
-        
         var constants = new MeshPushConstants { RenderMatrix = meshMatrix };
         _vk.CmdPushConstants(cmd, _meshPipelineLayout, ShaderStageFlags.VertexBit, 0,
             (uint)Unsafe.SizeOf<MeshPushConstants>(), &constants);

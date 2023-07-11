@@ -1,11 +1,11 @@
-﻿using System.Numerics;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
+using GlmSharp;
 
 namespace VkGuide.Types;
 
 [StructLayout(LayoutKind.Sequential)]
 public struct MeshPushConstants
 {
-    public Vector4 Data;
-    public Matrix4x4 RenderMatrix;
+    public vec4 Data;
+    public mat4 RenderMatrix;
 }
