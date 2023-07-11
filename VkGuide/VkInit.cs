@@ -1,5 +1,4 @@
 ﻿using Silk.NET.Core.Native;
-using Silk.NET.OpenGL;
 using Silk.NET.Vulkan;
 using VkGuide.Types;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;

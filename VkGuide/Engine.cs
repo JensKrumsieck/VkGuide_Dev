@@ -58,6 +58,8 @@ public class Engine
     private Pipeline _meshPipeline;
     private PipelineLayout _meshPipelineLayout;
 
+    private Camera _mainCamera;
+    
     private List<RenderObject> _renderables = new();
     private Dictionary<string, Material> _materials = new();
     private Dictionary<string, Mesh> _meshes = new();
@@ -78,6 +80,16 @@ public class Engine
         _window = Window.Create(options);
         _window.Initialize();
         _mainDeletionQueue.Queue(() => _window.Dispose());
+        
+        _mainCamera = new Camera
+        {
+            Fov = 70,
+            NearPlane = .1f,
+            FarPlane = 200f,
+            Position = new vec3(0, -6, -10),
+            Extent = _windowExtent
+        };
+        
         InitVulkan();
         InitCommands();
         InitDefaultRenderPass();
@@ -522,14 +534,6 @@ public class Engine
 
     private unsafe void DrawObjects(CommandBuffer cmd)
     {
-        var camPos = new vec3(0, -6f, -10f);
-        var view = mat4.Translate(camPos);
-        var projection = mat4.Perspective(70 * (MathF.PI / 180),
-            (_windowExtent.Width / (float) _windowExtent.Height),
-            .1f,
-            200f);
-        projection = projection with {m11 = projection.m11 * -1};
-
         Mesh lastMesh = default;
         Material lastMaterial = default;
         foreach (var obj in _renderables)
@@ -539,9 +543,8 @@ public class Engine
                 _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, obj.Material.Pipeline);
                 lastMaterial = obj.Material;
             }
-
             var modelMatrix = obj.TransformMatrix;
-            var meshMatrix = projection * view * modelMatrix;
+            var meshMatrix = _mainCamera.Projection * _mainCamera.View * modelMatrix;
             var constants = new MeshPushConstants {RenderMatrix = meshMatrix};
             _vk.CmdPushConstants(cmd, _meshPipelineLayout, ShaderStageFlags.VertexBit, 0,
                 (uint) Unsafe.SizeOf<MeshPushConstants>(), &constants);
