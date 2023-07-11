@@ -55,17 +55,14 @@ public class Engine
     private Semaphore _renderSemaphore;
     private Fence _renderFence;
 
-    private Pipeline _trianglePipeline;
-    private Pipeline _redTrianglePipeline;
     private Pipeline _meshPipeline;
-    private PipelineLayout _trianglePipelineLayout;
     private PipelineLayout _meshPipelineLayout;
 
-    private Mesh _triangleMesh;
-    private Mesh _monkeyMesh;
+    private List<RenderObject> _renderables = new();
+    private Dictionary<string, Material> _materials = new();
+    private Dictionary<string, Mesh> _meshes = new();
     
     private int _frameNumber;
-    private int _selectedPipeline;
     private bool _isInitialized;
 
     private DeletionQueue _mainDeletionQueue = new();
@@ -88,9 +85,12 @@ public class Engine
         InitSyncStructures();
         InitPipelines();
         LoadMeshes();
+        InitScene();
         _isInitialized = true;
     }
 
+    private void CreateMaterial(Pipeline pipeline, PipelineLayout layout, string name) => _materials[name] = new Material {Pipeline = pipeline, PipelineLayout = layout};
+    
     private unsafe void InitVulkan()
     {
         var instanceInfo = new InstanceBuilder()
@@ -151,17 +151,17 @@ public class Engine
 
         var depthImageExtent = new Extent3D(_windowExtent.Width, _windowExtent.Height, 1);
         _depthFormat = Format.D32Sfloat;
-        var dimgInfo =
+        var dImgInfo =
             VkInit.ImageCreateInfo(_depthFormat, ImageUsageFlags.DepthStencilAttachmentBit, depthImageExtent);
-        var dimgAllocInfo = new AllocationCreateInfo
+        var dImgAllocInfo = new AllocationCreateInfo
         {
             Usage = MemoryUsage.GPU_Only,
             RequiredFlags = MemoryPropertyFlags.DeviceLocalBit
         };
-        var image = _allocator.CreateImage(dimgInfo, dimgAllocInfo, out var allocation);
+        var image = _allocator.CreateImage(dImgInfo, dImgAllocInfo, out var allocation);
         _depthImage = new AllocatedImage {Image = image, Allocation = allocation};
-        var dviewInfo = VkInit.ImageViewCreateInfo(_depthFormat, _depthImage.Image, ImageAspectFlags.DepthBit);
-        _vk.CreateImageView(_device, dviewInfo, null, out _depthImageView);
+        var dViewInfo = VkInit.ImageViewCreateInfo(_depthFormat, _depthImage.Image, ImageAspectFlags.DepthBit);
+        _vk.CreateImageView(_device, dViewInfo, null, out _depthImageView);
         _mainDeletionQueue.Queue(() =>
         {
             _vk.DestroyImageView(_device, _depthImageView, null);
@@ -310,38 +310,29 @@ public class Engine
 
     private unsafe void InitPipelines()
     {
-        if (!LoaderShaderModule("triangle.frag.spv", out var fragShader))
+        if (!LoaderShaderModule("tri_mesh.vert.spv", out var triVertShader))
+            Console.WriteLine("Failed to load tri vert shader");
+        if (!LoaderShaderModule("tri_mesh.frag.spv", out var triFragShader))
             Console.WriteLine("Failed to load frag shader");
-        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, fragShader, null));
-        if(!LoaderShaderModule("triangle.vert.spv", out var vertShader))
-            Console.WriteLine("Failed to load vert shader");
-        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, vertShader, null));
-        if (!LoaderShaderModule("colored_triangle.frag.spv", out var coloredFragShader))
-            Console.WriteLine("Failed to load frag shader");
-        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, coloredFragShader, null));
-        if(!LoaderShaderModule("colored_triangle.vert.spv", out var coloredVertShader))
-            Console.WriteLine("Failed to load vert shader");
-        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, coloredVertShader, null));
+        _mainDeletionQueue.Queue(() =>
+        {
+            _vk.DestroyShaderModule(_device, triVertShader, null);
+            _vk.DestroyShaderModule(_device, triFragShader, null);
+        });
         
-        var layoutInfo = VkInit.PipelineLayoutCreateInfo();
-        _vk.CreatePipelineLayout(_device, layoutInfo, null, out _trianglePipelineLayout);
-        _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, _trianglePipelineLayout, null));
-
-        var pushConstant =
-            new PushConstantRange(ShaderStageFlags.VertexBit, 0, (uint) Unsafe.SizeOf<MeshPushConstants>());
-        layoutInfo.PPushConstantRanges = &pushConstant;
-        layoutInfo.PushConstantRangeCount = 1;
+        var pushConstant = new PushConstantRange(ShaderStageFlags.VertexBit, 0, (uint) Unsafe.SizeOf<MeshPushConstants>());
+        var layoutInfo = VkInit.PipelineLayoutCreateInfo(1, &pushConstant);
         _vk.CreatePipelineLayout(_device, layoutInfo, null, out _meshPipelineLayout);
         _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, _meshPipelineLayout, null));
-        
+        var vertexInputInfo = VkInit.VertexInputStateCreateInfo(Vertex.GetVertexDescription());
         var builder = new PipelineBuilder
         {
             ShaderStages = new[]
             {
-                VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, coloredVertShader),
-                VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, coloredFragShader)
+                VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, triVertShader),
+                VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, triFragShader)
             },
-            VertexInputInfo = VkInit.VertexInputStateCreateInfo(),
+            VertexInputInfo = vertexInputInfo,
             InputAssembly = VkInit.InputAssemblyCreateInfo(PrimitiveTopology.TriangleList),
             Viewport = new Viewport
             {
@@ -356,39 +347,11 @@ public class Engine
             Rasterizer = VkInit.RasterizationStateCreateInfo(PolygonMode.Fill),
             Multisampling = VkInit.MultisampleStateCreateInfo(),
             ColorBlendAttachment = VkInit.ColorBlendAttachmentState(),
-            PipelineLayout = _trianglePipelineLayout,
+            PipelineLayout = _meshPipelineLayout,
             DepthStencil = VkInit.DepthStencilCreateInfo(true, true, CompareOp.LessOrEqual)
         };
-
-        _trianglePipeline = builder.Build(_device, _renderPass);
-        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _trianglePipeline, null));
-        builder.ShaderStages = new[]
-        {
-            VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, vertShader),
-            VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, fragShader)
-        };
-        _redTrianglePipeline = builder.Build(_device, _renderPass);
-        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _redTrianglePipeline, null));
-
-        var vertexDescription = Vertex.GetVertexDescription();
-        fixed (VertexInputAttributeDescription* attributesPtr = vertexDescription.Attributes)
-            builder.VertexInputInfo.PVertexAttributeDescriptions = attributesPtr;
-        builder.VertexInputInfo.VertexAttributeDescriptionCount = (uint) vertexDescription.Attributes.Length;
-        fixed (VertexInputBindingDescription* bindingsPtr = vertexDescription.Bindings)
-            builder.VertexInputInfo.PVertexBindingDescriptions = bindingsPtr;
-        builder.VertexInputInfo.VertexBindingDescriptionCount = (uint) vertexDescription.Bindings.Length;
-        
-        if (!LoaderShaderModule("tri_mesh.vert.spv", out var triVertShader))
-            Console.WriteLine("Failed to load tri vert shader");
-        _mainDeletionQueue.Queue(() => _vk.DestroyShaderModule(_device, triVertShader, null));
-
-        builder.ShaderStages = new[]
-        {
-            VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, triVertShader),
-            VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, coloredFragShader)
-        };
-        builder.PipelineLayout = _meshPipelineLayout;
         _meshPipeline = builder.Build(_device, _renderPass);
+        CreateMaterial(_meshPipeline, _meshPipelineLayout, "defaultmesh");
         _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _meshPipeline, null));
     }
     
@@ -415,20 +378,41 @@ public class Engine
             new() {Position = new Vector3(-1, 1, 0), Color = new Vector3(0, 1, 0)},
             new() {Position = new Vector3(0,-1,0), Color = new Vector3(0,1,0)}
         };
-        _triangleMesh = new Mesh {Vertices = vertices};
-        _monkeyMesh = Mesh.LoadFromObj("./assets/monkey_smooth.obj");
+        var triangleMesh = new Mesh {Vertices = vertices};
+        var monkeyMesh = Mesh.LoadFromObj("./assets/monkey_smooth.obj");
 
-        UploadMesh(_monkeyMesh);
-        UploadMesh(_triangleMesh);
-        
+        UploadMesh(monkeyMesh);
+        UploadMesh(triangleMesh);
+
+        _meshes["monkey"] = monkeyMesh;
+        _meshes["triangle"] = triangleMesh;
     }
-
+    
     private unsafe void UploadMesh(Mesh mesh)
     {
         CreateBuffer<Vertex>(mesh.Vertices, out var buffer, out var allocation);
         mesh.VertexBuffer = new AllocatedBuffer { Allocation = allocation, Buffer = buffer};
         _mainDeletionQueue.Queue(() => _vk.DestroyBuffer(_device, buffer, null));
         _mainDeletionQueue.Queue(() => allocation.Dispose());
+    }
+    
+    private void InitScene()
+    {
+        var monkey = new RenderObject
+            {Mesh = _meshes["monkey"], Material = _materials["defaultmesh"], TransformMatrix = mat4.Identity};
+        _renderables.Add(monkey);
+
+        for(var x = -20; x <= 20; x++)
+        for (var y = -20; y <= 20; y++)
+        {
+            var translation = mat4.Translate(x, 0, y);
+            var scale = mat4.Scale(.2f, .2f, .2f);
+            var tri = new RenderObject
+            {
+                Mesh = _meshes["triangle"], Material = _materials["defaultmesh"], TransformMatrix = translation * scale
+            };
+            _renderables.Add(tri);
+        }
     }
 
     private void CreateBuffer<T>(ReadOnlySpan<T> span, out Buffer buffer, out Allocation allocation)
@@ -455,14 +439,6 @@ public class Engine
     public void Run()
     {
         _window.Render += Draw;
-        var input = _window.CreateInput();
-        input.Keyboards[0].KeyDown += (keyboard, key, arg3) =>
-        {
-            if (key != Key.Space) return;
-            _selectedPipeline++;
-            if (_selectedPipeline > 2) _selectedPipeline = 0;
-            Console.WriteLine("Switching Shaders");
-        };
         _window.Run();
         _vk.DeviceWaitIdle(_device);
     }
@@ -505,29 +481,9 @@ public class Engine
                 PClearValues = clearValuePtr
             };
             _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
+            DrawObjects(cmd);
+            _vk.CmdEndRenderPass(cmd);
         }
-
-        _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _meshPipeline);
-        ulong offset = 0; 
-        var vertBuffer = _monkeyMesh.VertexBuffer.Buffer;
-        //var vertBuffer = _triangleMesh.VertexBuffer.Buffer;
-        _vk.CmdBindVertexBuffers(cmd, 0, 1, &vertBuffer, &offset);
-        var camPos = new vec3(0, 0, -2f);
-        var view = mat4.Translate(camPos);
-        var projection = mat4.Perspective(70 * (MathF.PI / 180),
-                                                                (_windowExtent.Width / (float) _windowExtent.Height),
-                                                                .1f,
-                                                                200f);
-        projection = projection with {m11 = projection.m11 * -1};
-        var model = mat4.Rotate(_frameNumber * .4f * (MathF.PI / 180), vec3.UnitY);
-        var meshMatrix = projection * view * model;
-        var constants = new MeshPushConstants { RenderMatrix = meshMatrix };
-        _vk.CmdPushConstants(cmd, _meshPipelineLayout, ShaderStageFlags.VertexBit, 0,
-            (uint)Unsafe.SizeOf<MeshPushConstants>(), &constants);
-        
-        //_vk.CmdDraw(cmd, (uint)_triangleMesh.Vertices.Length, 1, 0, 0);
-        _vk.CmdDraw(cmd, (uint)_monkeyMesh.Vertices.Length, 1, 0, 0);
-        _vk.CmdEndRenderPass(cmd);
         _vk.EndCommandBuffer(_mainCommandBuffer);
         
         var waitStage = PipelineStageFlags.ColorAttachmentOutputBit;
@@ -562,6 +518,43 @@ public class Engine
             _khrSwapchain.QueuePresent(_graphicsQueue, presentInfo);
         }
         _frameNumber++;
+    }
+
+    private unsafe void DrawObjects(CommandBuffer cmd)
+    {
+        var camPos = new vec3(0, -6f, -10f);
+        var view = mat4.Translate(camPos);
+        var projection = mat4.Perspective(70 * (MathF.PI / 180),
+            (_windowExtent.Width / (float) _windowExtent.Height),
+            .1f,
+            200f);
+        projection = projection with {m11 = projection.m11 * -1};
+
+        Mesh lastMesh = default;
+        Material lastMaterial = default;
+        foreach (var obj in _renderables)
+        {
+            if (obj.Material != lastMaterial)
+            {
+                _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, obj.Material.Pipeline);
+                lastMaterial = obj.Material;
+            }
+
+            var modelMatrix = obj.TransformMatrix;
+            var meshMatrix = projection * view * modelMatrix;
+            var constants = new MeshPushConstants {RenderMatrix = meshMatrix};
+            _vk.CmdPushConstants(cmd, _meshPipelineLayout, ShaderStageFlags.VertexBit, 0,
+                (uint) Unsafe.SizeOf<MeshPushConstants>(), &constants);
+
+            if (obj.Mesh != lastMesh)
+            {
+                ulong offset = 0;
+                var vertBuffer = obj.Mesh.VertexBuffer.Buffer;
+                _vk.CmdBindVertexBuffers(cmd, 0, 1, &vertBuffer, &offset);
+                lastMesh = obj.Mesh;
+            }
+            _vk.CmdDraw(cmd, (uint)lastMesh.Vertices.Length, 1, 0, 0);
+        }
     }
 
     public void Terminate()

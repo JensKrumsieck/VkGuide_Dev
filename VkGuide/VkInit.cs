@@ -1,6 +1,7 @@
 ﻿using Silk.NET.Core.Native;
 using Silk.NET.OpenGL;
 using Silk.NET.Vulkan;
+using VkGuide.Types;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
 
 namespace VkGuide;
@@ -44,8 +45,9 @@ public static class VkInit
         return info;
     }
 
-    public static PipelineVertexInputStateCreateInfo VertexInputStateCreateInfo()
+    public static unsafe PipelineVertexInputStateCreateInfo VertexInputStateCreateInfo(VertexInputDescription? description = null)
     {
+        
         var info = new PipelineVertexInputStateCreateInfo
         {
             SType = StructureType.PipelineVertexInputStateCreateInfo,
@@ -53,6 +55,15 @@ public static class VkInit
             VertexAttributeDescriptionCount = 0,
             VertexBindingDescriptionCount = 0
         };
+        if (description.HasValue)
+        {
+            fixed (VertexInputAttributeDescription* attributesPtr = description.Value.Attributes)
+                info.PVertexAttributeDescriptions = attributesPtr;
+            info.VertexAttributeDescriptionCount = (uint)description.Value.Attributes.Length;
+            fixed (VertexInputBindingDescription* bindingsPtr = description.Value.Bindings)
+                info.PVertexBindingDescriptions = bindingsPtr;
+            info.VertexBindingDescriptionCount = (uint)description.Value.Bindings.Length;
+        }
         return info;
     }
 
@@ -116,7 +127,7 @@ public static class VkInit
         return colorBlendAttachment;
     }
 
-    public static PipelineLayoutCreateInfo PipelineLayoutCreateInfo()
+    public static unsafe PipelineLayoutCreateInfo PipelineLayoutCreateInfo(uint pushConstantRangeCount = 0, PushConstantRange* pushConstantRange = null)
     {
         var info = new PipelineLayoutCreateInfo
         {
@@ -125,8 +136,8 @@ public static class VkInit
             Flags = 0,
             SetLayoutCount = 0,
             PSetLayouts = null,
-            PushConstantRangeCount = 0,
-            PPushConstantRanges = null
+            PushConstantRangeCount = pushConstantRangeCount,
+            PPushConstantRanges = pushConstantRange
         };
         return info;
     }
