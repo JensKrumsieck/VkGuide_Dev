@@ -80,23 +80,14 @@ public class Engine
         _window = Window.Create(options);
         _window.Initialize();
         _mainDeletionQueue.Queue(() => _window.Dispose());
-        
-        _mainCamera = new Camera
-        {
-            Fov = 70,
-            NearPlane = .1f,
-            FarPlane = 200f,
-            Position = new vec3(0, -6, -10),
-            Extent = _windowExtent
-        };
-        
+
         InitVulkan();
         InitCommands();
         InitDefaultRenderPass();
         InitFrameBuffers();
         InitSyncStructures();
         InitPipelines();
-        LoadMeshes();
+        LoadContent();
         InitScene();
         _isInitialized = true;
     }
@@ -382,8 +373,17 @@ public class Engine
         }
     }
 
-    private void LoadMeshes()
+    private void LoadContent()
     {
+        _mainCamera = new Camera
+        {
+            Fov = 70,
+            NearPlane = .1f,
+            FarPlane = 200f,
+            Position = new vec3(0, -6, -10),
+            Extent = _windowExtent
+        };
+        
         var vertices = new Vertex[]
         {
             new() {Position = new Vector3(1, 1, 0), Color = new Vector3(0, 1, 0)},
