@@ -59,6 +59,7 @@ public class Engine
     private PipelineLayout _meshPipelineLayout;
 
     private Mesh _triangleMesh;
+    private Mesh _monkeyMesh;
     
     private int _frameNumber;
     private int _selectedPipeline;
@@ -337,7 +338,11 @@ public class Engine
             new() {Position = new Vector3(0,-1,0), Color = new Vector3(0,1,0)}
         };
         _triangleMesh = new Mesh {Vertices = vertices};
+        _monkeyMesh = Mesh.LoadFromObj("./assets/monkey_smooth.obj");
+
+        UploadMesh(_monkeyMesh);
         UploadMesh(_triangleMesh);
+        
     }
 
     private unsafe void UploadMesh(Mesh mesh)
@@ -419,8 +424,9 @@ public class Engine
         };
         _vk.CmdBeginRenderPass(cmd, rpInfo, SubpassContents.Inline);
         _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _meshPipeline);
-        ulong offset = 0;
-        var vertBuffer = _triangleMesh.VertexBuffer.Buffer;
+        ulong offset = 0; 
+        var vertBuffer = _monkeyMesh.VertexBuffer.Buffer;
+        //var vertBuffer = _triangleMesh.VertexBuffer.Buffer;
         _vk.CmdBindVertexBuffers(cmd, 0, 1, &vertBuffer, &offset);
         var camPos = new vec3(0, 0, -2f);
         var view = mat4.Translate(camPos);
@@ -435,7 +441,8 @@ public class Engine
         _vk.CmdPushConstants(cmd, _meshPipelineLayout, ShaderStageFlags.VertexBit, 0,
             (uint)Unsafe.SizeOf<MeshPushConstants>(), &constants);
         
-        _vk.CmdDraw(cmd, (uint)_triangleMesh.Vertices.Length, 1, 0, 0);
+        //_vk.CmdDraw(cmd, (uint)_triangleMesh.Vertices.Length, 1, 0, 0);
+        _vk.CmdDraw(cmd, (uint)_monkeyMesh.Vertices.Length, 1, 0, 0);
         _vk.CmdEndRenderPass(cmd);
         _vk.EndCommandBuffer(_mainCommandBuffer);
         

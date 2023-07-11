@@ -9,6 +9,8 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\ObjLoader\Src\ObjLoader\ObjLoader.csproj" />
+      <ProjectReference Include="..\VMASharp\VMASharp\VMASharp.csproj" />
       <ProjectReference Include="..\Vulkanize\Vulkanize.csproj" />
     </ItemGroup>
     <ItemGroup>
@@ -17,7 +19,15 @@
     </ItemGroup>
     <ItemGroup>
       <PackageReference Include="GlmSharp" Version="0.9.8" />
-      <PackageReference Include="hydos.VulkanMemoryAllocator" Version="1.0.0" />
+      <PackageReference Include="Silk.NET.Assimp" Version="2.17.1" />
+    </ItemGroup>
+    <ItemGroup>
+      <None Update="Assets\monkey_smooth.mtl">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="Assets\monkey_smooth.obj">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
     </ItemGroup>
 
     <Target Name="CleanCompiledShaders" AfterTargets="Clean">
