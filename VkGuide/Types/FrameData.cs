@@ -11,4 +11,7 @@ public struct FrameData
 
     public CommandPool CommandPool;
     public CommandBuffer MainCommandBuffer;
+
+    public AllocatedBuffer CameraBuffer;
+    public DescriptorSet GlobalDescriptor;
 }

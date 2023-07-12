@@ -9,7 +9,6 @@ using Silk.NET.Windowing;
 using VkGuide.Types;
 using Vulkanize;
 using VMASharp;
-using Buffer = Silk.NET.Vulkan.Buffer;
 using Framebuffer = Silk.NET.Vulkan.Framebuffer;
 using Image = Silk.NET.Vulkan.Image;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
@@ -51,6 +50,8 @@ public class Engine
     private PipelineLayout _meshPipelineLayout;
 
     private Camera _mainCamera;
+    private DescriptorSetLayout _globalSetLayout;
+    private DescriptorPool _descriptorPool;
     
     private List<RenderObject> _renderables = new();
     private Dictionary<string, Material> _materials = new();
@@ -91,6 +92,7 @@ public class Engine
         InitDefaultRenderPass();
         InitFrameBuffers();
         InitSyncStructures();
+        InitDescriptors();
         InitPipelines();
         LoadContent();
         InitScene();
@@ -336,6 +338,88 @@ public class Engine
             });
         }
     }
+    
+    private unsafe void InitDescriptors()
+    {
+        var sizes = new DescriptorPoolSize[]
+        {
+            new(DescriptorType.UniformBuffer, 10)
+        };
+        fixed(DescriptorPoolSize* sizesPtr = sizes)
+        {
+            var poolInfo = new DescriptorPoolCreateInfo
+            {
+                SType = StructureType.DescriptorPoolCreateInfo,
+                Flags = 0,
+                MaxSets = 10,
+                PoolSizeCount = (uint)sizes.Length,
+                PPoolSizes = sizesPtr
+            };
+            _vk.CreateDescriptorPool(_device, poolInfo, null, out _descriptorPool);
+        }
+
+        var camBufferBinding = new DescriptorSetLayoutBinding
+        {
+            Binding = 0,
+            DescriptorCount = 1,
+            DescriptorType = DescriptorType.UniformBuffer,
+            StageFlags = ShaderStageFlags.VertexBit
+        };
+        var setInfo = new DescriptorSetLayoutCreateInfo
+        {
+            SType = StructureType.DescriptorSetLayoutCreateInfo,
+            PNext = null,
+            BindingCount = 1,
+            Flags = 0,
+            PBindings = &camBufferBinding
+        };
+        _vk.CreateDescriptorSetLayout(_device, setInfo, null, out _globalSetLayout);
+        _mainDeletionQueue.Queue(() => _vk.DestroyDescriptorSetLayout(_device, _globalSetLayout, null));
+        
+        for (var i = 0; i < FrameOverlap; i++)
+        {
+            var buffer = CreateBuffer((uint) Unsafe.SizeOf<CameraData>(),
+                                      BufferUsageFlags.UniformBufferBit,
+                                      MemoryUsage.CPU_To_GPU);
+            _frames[i].CameraBuffer = buffer;
+
+            var setLayouts = _globalSetLayout;
+            var allocInfo = new DescriptorSetAllocateInfo
+            {
+                SType = StructureType.DescriptorSetAllocateInfo,
+                PNext = null,
+                DescriptorPool = _descriptorPool,
+                DescriptorSetCount = 1,
+                PSetLayouts = &setLayouts
+            };
+            _vk.AllocateDescriptorSets(_device, allocInfo, out _frames[i].GlobalDescriptor);
+
+            var bInfo = new DescriptorBufferInfo
+            {
+                Buffer = _frames[i].CameraBuffer.Buffer,
+                Offset = 0,
+                Range = (uint)Unsafe.SizeOf<CameraData>()
+            };
+            var setWrite = new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet,
+                PNext = null,
+                DstBinding = 0,
+                DstSet = _frames[i].GlobalDescriptor,
+                DescriptorCount = 1,
+                DescriptorType = DescriptorType.UniformBuffer,
+                PBufferInfo = &bInfo
+            };
+            _vk.UpdateDescriptorSets(_device, 1, setWrite, 0, null);
+
+            _mainDeletionQueue.Queue(() =>
+            {
+                _vk.DestroyBuffer(_device, buffer.Buffer, null);
+                buffer.Allocation.Dispose();
+            });
+        }
+        _mainDeletionQueue.Queue(() => _vk.DestroyDescriptorPool(_device, _descriptorPool, null));
+    }
 
     private unsafe void InitPipelines()
     {
@@ -350,7 +434,10 @@ public class Engine
         });
         
         var pushConstant = new PushConstantRange(ShaderStageFlags.VertexBit, 0, (uint) Unsafe.SizeOf<MeshPushConstants>());
+        var setLayout = _globalSetLayout;
         var layoutInfo = VkInit.PipelineLayoutCreateInfo(1, &pushConstant);
+        layoutInfo.SetLayoutCount = 1;
+        layoutInfo.PSetLayouts = &setLayout;
         _vk.CreatePipelineLayout(_device, layoutInfo, null, out _meshPipelineLayout);
         _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, _meshPipelineLayout, null));
         var vertexInputInfo = VkInit.VertexInputStateCreateInfo(Vertex.GetVertexDescription());
@@ -428,10 +515,10 @@ public class Engine
     
     private unsafe void UploadMesh(Mesh mesh)
     {
-        CreateBuffer<Vertex>(mesh.Vertices, out var buffer, out var allocation);
-        mesh.VertexBuffer = new AllocatedBuffer { Allocation = allocation, Buffer = buffer};
-        _mainDeletionQueue.Queue(() => _vk.DestroyBuffer(_device, buffer, null));
-        _mainDeletionQueue.Queue(() => allocation.Dispose());
+        CreateBuffer<Vertex>(mesh.Vertices, out var allocatedBuffer);
+        mesh.VertexBuffer = allocatedBuffer;
+        _mainDeletionQueue.Queue(() => _vk.DestroyBuffer(_device, allocatedBuffer.Buffer, null));
+        _mainDeletionQueue.Queue(() => allocatedBuffer.Allocation.Dispose());
     }
     
     private void InitScene()
@@ -453,23 +540,31 @@ public class Engine
             }
     }
 
-    private void CreateBuffer<T>(ReadOnlySpan<T> span, out Buffer buffer, out Allocation allocation)
-        where T : unmanaged
+    private AllocatedBuffer CreateBuffer(uint size, BufferUsageFlags usage, MemoryUsage memoryUsage)
     {
         var bufferInfo = new BufferCreateInfo
         {
             SType = StructureType.BufferCreateInfo,
-            Size = (uint)span.Length * (uint)Unsafe.SizeOf<T>(),
-            Usage = BufferUsageFlags.VertexBufferBit
+            PNext = null,
+            Size = size,
+            Usage = usage
         };
         var allocInfo = new AllocationCreateInfo
         {
             Flags = AllocationCreateFlags.Mapped,
             Usage = MemoryUsage.CPU_To_GPU
         };
-        buffer = _allocator.CreateBuffer(in bufferInfo, in allocInfo, out allocation); 
-        
-        if (!allocation.TryGetSpan(out Span<T> bufferSpan))
+        var buffer = _allocator.CreateBuffer(bufferInfo, allocInfo, out var allocation);
+        return new AllocatedBuffer {Buffer = buffer, Allocation = allocation};
+    }
+    
+    private void CreateBuffer<T>(ReadOnlySpan<T> span, out AllocatedBuffer allocatedBuffer)
+        where T : unmanaged
+    {
+        allocatedBuffer = CreateBuffer((uint) span.Length * (uint) Unsafe.SizeOf<T>(), BufferUsageFlags.VertexBufferBit,
+                     MemoryUsage.CPU_To_GPU);
+
+        if (!allocatedBuffer.Allocation.TryGetSpan(out Span<T> bufferSpan))
             throw new InvalidOperationException("Unable to get Span<T> to mapped allocation.");
         span.CopyTo(bufferSpan);
     }
@@ -573,6 +668,12 @@ public class Engine
 
     private unsafe void DrawObjects(CommandBuffer cmd)
     {
+        _frames[CurrentFrame].CameraBuffer.Allocation.Map();
+        var data = _mainCamera.CameraData;
+        var camPtr = (CameraData*)_frames[CurrentFrame].CameraBuffer.Allocation.MappedData;
+        camPtr[0] = data;
+        _frames[CurrentFrame].CameraBuffer.Allocation.Unmap();
+        
         Mesh lastMesh = default;
         Material lastMaterial = default;
         foreach (var obj in _renderables)
@@ -581,10 +682,9 @@ public class Engine
             {
                 _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, obj.Material.Pipeline);
                 lastMaterial = obj.Material;
+                _vk.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, obj.Material.PipelineLayout, 0, 1, _frames[CurrentFrame].GlobalDescriptor, 0 ,null);
             }
-            var modelMatrix = obj.TransformMatrix;
-            var meshMatrix = _mainCamera.Projection * _mainCamera.View * modelMatrix;
-            var constants = new MeshPushConstants {RenderMatrix = meshMatrix};
+            var constants = new MeshPushConstants {RenderMatrix = obj.TransformMatrix};
             _vk.CmdPushConstants(cmd, lastMaterial.PipelineLayout, ShaderStageFlags.VertexBit, 0,
                 (uint) Unsafe.SizeOf<MeshPushConstants>(), &constants);
 

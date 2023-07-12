@@ -12,7 +12,7 @@ public class Camera
         set
         {
             _position = value;
-            View = mat4.Translate(_position);
+            ResetView();
         }
     }
 
@@ -61,15 +61,23 @@ public class Camera
         }
     }
 
-    public mat4 View { get; private set; }
-    public mat4 Projection { get; private set; }
-
+    public CameraData CameraData;
+    
     private void ResetProjection()
     {
-        Projection = mat4.Perspective(_fov * (MathF.PI / 180),
+        CameraData.Projection = mat4.Perspective(_fov * (MathF.PI / 180),
             (_extent.Width / (float) _extent.Height),
             _near,
             _far);
-        Projection = Projection with {m11 = Projection.m11 * -1};
+        CameraData.Projection = CameraData.Projection with {m11 = CameraData.Projection.m11 * -1};
+        ResetViewProjection();
     }
+
+    private void ResetView()
+    {
+        CameraData.View = mat4.Translate(_position);
+        ResetViewProjection();
+    }
+
+    private void ResetViewProjection() => CameraData.ViewProjection =  CameraData.Projection * CameraData.View;
 }
