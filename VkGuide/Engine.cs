@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Numerics;
+﻿using System.Numerics;
 using System.Runtime.CompilerServices;
 using GlmSharp;
 using Silk.NET.Input;
@@ -14,7 +13,6 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 using Framebuffer = Silk.NET.Vulkan.Framebuffer;
 using Image = Silk.NET.Vulkan.Image;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
-using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace VkGuide;
 
@@ -46,15 +44,8 @@ public class Engine
     private Queue _graphicsQueue;
     private uint _graphicsQueueFamily;
 
-    private CommandPool _commandPool;
-    private CommandBuffer _mainCommandBuffer;
-
     private RenderPass _renderPass;
     private Framebuffer[] _framebuffers;
-
-    private Semaphore _presentSemaphore;
-    private Semaphore _renderSemaphore;
-    private Fence _renderFence;
 
     private Pipeline _meshPipeline;
     private PipelineLayout _meshPipelineLayout;
@@ -70,6 +61,10 @@ public class Engine
     
     private int _frameNumber;
     private bool _isInitialized;
+
+    private const int FrameOverlap = 2;
+    private int CurrentFrame => _frameNumber % FrameOverlap;
+    private FrameData[] _frames = new FrameData[FrameOverlap];
 
     private DeletionQueue _mainDeletionQueue = new();
     
@@ -186,10 +181,19 @@ public class Engine
     private unsafe void InitCommands()
     {
         var commandPoolInfo = VkInit.CommandPoolCreateInfo(_graphicsQueueFamily);
-        _vk.CreateCommandPool(_device, commandPoolInfo, null, out _commandPool);
-        _mainDeletionQueue.Queue(() => _vk.DestroyCommandPool(_device, _commandPool, null));
-        var cmdAllocInfo = VkInit.CommandBufferAllocateInfo(_commandPool);
-        _vk.AllocateCommandBuffers(_device, cmdAllocInfo, out _mainCommandBuffer);
+        for (var i = 0; i < FrameOverlap; i++)
+        {
+            _vk.CreateCommandPool(_device, commandPoolInfo, null, out var commandPool);
+            var cmdAllocInfo = VkInit.CommandBufferAllocateInfo(commandPool);
+            _vk.AllocateCommandBuffers(_device, cmdAllocInfo, out var mainCommandBuffer);
+            _frames[i] = new FrameData
+            {
+                CommandPool = commandPool,
+                MainCommandBuffer = mainCommandBuffer
+            };
+            _mainDeletionQueue.Queue(() => _vk.DestroyCommandPool(_device, commandPool, null));
+        }
+
     }
 
     private unsafe void InitDefaultRenderPass()
@@ -312,13 +316,25 @@ public class Engine
     private unsafe void InitSyncStructures()
     {
         var fenceInfo = VkInit.FenceCreateInfo(FenceCreateFlags.SignaledBit);
-        _vk.CreateFence(_device, fenceInfo, null, out _renderFence);
-        _mainDeletionQueue.Queue(() => _vk.DestroyFence(_device, _renderFence, null));
         var semaphoreInfo = VkInit.SemaphoreCreateInfo();
-        _vk.CreateSemaphore(_device, semaphoreInfo, null, out _presentSemaphore);
-        _mainDeletionQueue.Queue(() => _vk.DestroySemaphore(_device, _presentSemaphore, null));
-        _vk.CreateSemaphore(_device, semaphoreInfo, null, out _renderSemaphore);
-        _mainDeletionQueue.Queue(() => _vk.DestroySemaphore(_device, _renderSemaphore, null));
+
+        for (var i = 0; i < FrameOverlap; i++)
+        {
+            _vk.CreateFence(_device, fenceInfo, null, out var renderFence);
+            _vk.CreateSemaphore(_device, semaphoreInfo, null, out var presentSemaphore);
+            _vk.CreateSemaphore(_device, semaphoreInfo, null, out var renderSemaphore);
+        
+            _frames[i].PresentSemaphore = presentSemaphore;
+            _frames[i].RenderSemaphore = renderSemaphore;
+            _frames[i].RenderFence = renderFence;
+            
+            _mainDeletionQueue.Queue(() =>
+            {
+                _vk.DestroyFence(_device, renderFence, null);
+                _vk.DestroySemaphore(_device, presentSemaphore, null);
+                _vk.DestroySemaphore(_device, renderSemaphore, null);
+            });
+        }
     }
 
     private unsafe void InitPipelines()
@@ -480,13 +496,13 @@ public class Engine
 
     private unsafe void Draw(double deltaTime)
     {
-        _vk.WaitForFences(_device, 1, _renderFence, true, 1000000000);
-        _vk.ResetFences(_device, 1, _renderFence);
+        _vk.WaitForFences(_device, 1, _frames[CurrentFrame].RenderFence, true, 1000000000);
+        _vk.ResetFences(_device, 1, _frames[CurrentFrame].RenderFence);
         var swapchainImageIndex = 0U;
-        _khrSwapchain.AcquireNextImage(_device, _swapchain, 1000000000, _presentSemaphore, default,
+        _khrSwapchain.AcquireNextImage(_device, _swapchain, 1000000000, _frames[CurrentFrame].PresentSemaphore, default,
             ref swapchainImageIndex);
-        _vk.ResetCommandBuffer(_mainCommandBuffer, 0);
-        var cmd = _mainCommandBuffer;
+        _vk.ResetCommandBuffer(_frames[CurrentFrame].MainCommandBuffer, 0);
+        var cmd = _frames[CurrentFrame].MainCommandBuffer;
         var cmdBeginInfo = new CommandBufferBeginInfo
         {
             SType = StructureType.CommandBufferBeginInfo,
@@ -519,11 +535,11 @@ public class Engine
             DrawObjects(cmd);
             _vk.CmdEndRenderPass(cmd);
         }
-        _vk.EndCommandBuffer(_mainCommandBuffer);
+        _vk.EndCommandBuffer(_frames[CurrentFrame].MainCommandBuffer);
         
         var waitStage = PipelineStageFlags.ColorAttachmentOutputBit;
-        var waitSemaphore = _presentSemaphore;
-        var signalSemaphore = _renderSemaphore;
+        var waitSemaphore = _frames[CurrentFrame].PresentSemaphore;
+        var signalSemaphore = _frames[CurrentFrame].RenderSemaphore;
         var submit = new SubmitInfo
         {
             SType = StructureType.SubmitInfo,
@@ -536,7 +552,7 @@ public class Engine
             CommandBufferCount = 1,
             PCommandBuffers = &cmd
         };
-        _vk.QueueSubmit(_graphicsQueue, 1, submit, _renderFence);
+        _vk.QueueSubmit(_graphicsQueue, 1, submit, _frames[CurrentFrame].RenderFence);
 
         fixed (SwapchainKHR* swapchainPtr = &_swapchain)
         {
