@@ -561,7 +561,7 @@ public class Engine
         Material lastMaterial = default;
         foreach (var obj in _renderables)
         {
-            if (obj.Material != lastMaterial)
+            if (!ReferenceEquals(obj.Material, lastMaterial))
             {
                 _vk.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, obj.Material.Pipeline);
                 lastMaterial = obj.Material;
@@ -569,7 +569,7 @@ public class Engine
             var modelMatrix = obj.TransformMatrix;
             var meshMatrix = _mainCamera.Projection * _mainCamera.View * modelMatrix;
             var constants = new MeshPushConstants {RenderMatrix = meshMatrix};
-            _vk.CmdPushConstants(cmd, _meshPipelineLayout, ShaderStageFlags.VertexBit, 0,
+            _vk.CmdPushConstants(cmd, lastMaterial.PipelineLayout, ShaderStageFlags.VertexBit, 0,
                 (uint) Unsafe.SizeOf<MeshPushConstants>(), &constants);
 
             if (obj.Mesh != lastMesh)

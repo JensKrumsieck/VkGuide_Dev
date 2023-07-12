@@ -2,4 +2,8 @@
 
 namespace VkGuide.Types;
 
-public record struct Material( Pipeline Pipeline, PipelineLayout PipelineLayout);
+public class Material{
+    
+    public Pipeline Pipeline;
+    public PipelineLayout PipelineLayout;
+}
