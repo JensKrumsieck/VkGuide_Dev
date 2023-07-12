@@ -9,7 +9,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\ObjLoader\Src\ObjLoader\ObjLoader.csproj" />
       <ProjectReference Include="..\VMASharp\VMASharp\VMASharp.csproj" />
       <ProjectReference Include="..\Vulkanize\Vulkanize.csproj" />
     </ItemGroup>
