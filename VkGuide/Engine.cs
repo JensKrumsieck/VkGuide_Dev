@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using GlmSharp;
 using Silk.NET.Input;
@@ -63,6 +64,9 @@ public class Engine
     private List<RenderObject> _renderables = new();
     private Dictionary<string, Material> _materials = new();
     private Dictionary<string, Mesh> _meshes = new();
+
+    private IInputContext _inputCtx;
+    private IKeyboard _keyboard;
     
     private int _frameNumber;
     private bool _isInitialized;
@@ -79,7 +83,13 @@ public class Engine
         };
         _window = Window.Create(options);
         _window.Initialize();
-        _mainDeletionQueue.Queue(() => _window.Dispose());
+        _inputCtx = _window.CreateInput();
+        _keyboard = _inputCtx.Keyboards[0];
+        _mainDeletionQueue.Queue(() =>
+        {
+            _inputCtx.Dispose();
+            _window.Dispose();
+        });
 
         InitVulkan();
         InitCommands();
@@ -91,7 +101,7 @@ public class Engine
         InitScene();
         _isInitialized = true;
     }
-
+    
     private void CreateMaterial(Pipeline pipeline, PipelineLayout layout, string name) => _materials[name] = new Material {Pipeline = pipeline, PipelineLayout = layout};
     
     private unsafe void InitVulkan()
@@ -415,16 +425,16 @@ public class Engine
         _renderables.Add(monkey);
 
         for(var x = -20; x <= 20; x++)
-        for (var y = -20; y <= 20; y++)
-        {
-            var translation = mat4.Translate(x, 0, y);
-            var scale = mat4.Scale(.2f, .2f, .2f);
-            var tri = new RenderObject
+            for (var y = -20; y <= 20; y++)
             {
-                Mesh = _meshes["triangle"], Material = _materials["defaultmesh"], TransformMatrix = translation * scale
-            };
-            _renderables.Add(tri);
-        }
+                var translation = mat4.Translate(x, 0, y);
+                var scale = mat4.Scale(.2f, .2f, .2f);
+                var tri = new RenderObject
+                {
+                    Mesh = _meshes["triangle"], Material = _materials["defaultmesh"], TransformMatrix = translation * scale
+                };
+                _renderables.Add(tri);
+            }
     }
 
     private void CreateBuffer<T>(ReadOnlySpan<T> span, out Buffer buffer, out Allocation allocation)
@@ -451,8 +461,21 @@ public class Engine
     public void Run()
     {
         _window.Render += Draw;
+        _window.Update += Update;
         _window.Run();
         _vk.DeviceWaitIdle(_device);
+    }
+
+    private void Update(double deltaTime)
+    {
+        var upKeys = _keyboard.IsKeyPressed(Key.W) || _keyboard.IsKeyPressed(Key.Up) ? 1 : 0;
+        var leftKeys = _keyboard.IsKeyPressed(Key.A) || _keyboard.IsKeyPressed(Key.Left) ? 1 : 0;
+        var downKeys = _keyboard.IsKeyPressed(Key.S) || _keyboard.IsKeyPressed(Key.Down) ? 1 : 0;
+        var rightKeys = _keyboard.IsKeyPressed(Key.D) || _keyboard.IsKeyPressed(Key.Right) ? 1 : 0;
+        var inputVector = new vec2(leftKeys - rightKeys, upKeys - downKeys).NormalizedSafe;
+        const float movementSpeed = 10f;
+        inputVector *= movementSpeed * (float)deltaTime;
+        _mainCamera.Position += new vec3(inputVector.x, 0, inputVector.y);
     }
 
     private unsafe void Draw(double deltaTime)
