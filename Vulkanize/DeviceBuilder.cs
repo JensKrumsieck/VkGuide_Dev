@@ -4,11 +4,12 @@ using Silk.NET.Vulkan;
 
 namespace Vulkanize;
 
-public class DeviceBuilder
+public unsafe class DeviceBuilder
 {
     private readonly Vk _vk;
     private readonly PhysicalDeviceInfo _physicalDeviceInfo;
     private bool _enableValidationLayers;
+    private void* _pNext;
     
     private readonly List<string> _layers = new();
     public DeviceBuilder(PhysicalDeviceInfo physicalDeviceInfo)
@@ -22,8 +23,14 @@ public class DeviceBuilder
         if(_enableValidationLayers) _layers.Add("VK_LAYER_KHRONOS_validation");
         return this;
     }
+
+    public unsafe DeviceBuilder AddPNext(void* pNext)
+    {
+        _pNext = pNext;
+        return this;
+    }
     
-    public unsafe DeviceInfo Build()
+    public DeviceInfo Build()
     {
         var indices = Vulkanize.FindQueueFamilies(_physicalDeviceInfo.PhysicalDevice, _physicalDeviceInfo.Surface);
         var uniqueQueueFamilies = new[] { indices.GraphicsFamily!.Value, indices.PresentFamily!.Value };
@@ -53,7 +60,8 @@ public class DeviceBuilder
             PQueueCreateInfos = queueCreateInfos,
             PEnabledFeatures = &deviceFeatures,
             EnabledExtensionCount = (uint)deviceExtensions.Length,
-            PpEnabledExtensionNames = (byte**)SilkMarshal.StringArrayToPtr(deviceExtensions)
+            PpEnabledExtensionNames = (byte**)SilkMarshal.StringArrayToPtr(deviceExtensions),
+            PNext = _pNext
         };
 
         var layers = _layers.ToArray();

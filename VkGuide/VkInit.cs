@@ -1,6 +1,7 @@
 ﻿using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
 using VkGuide.Types;
+using Buffer = Silk.NET.Vulkan.Buffer;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
 
 namespace VkGuide;
@@ -249,5 +250,49 @@ public static class VkInit
             PBufferInfo = &bufferInfo
         };
         return write;
+    }
+
+    public static unsafe DescriptorSetLayoutCreateInfo DescriptorSetLayoutCreateInfo(DescriptorSetLayoutBinding[] bindings)
+    {
+        fixed (DescriptorSetLayoutBinding* bindingsPtr = bindings)
+        {
+            var info = new DescriptorSetLayoutCreateInfo
+            {
+                SType = StructureType.DescriptorSetLayoutCreateInfo,
+                PNext = null,
+                BindingCount = (uint) bindings.Length,
+                Flags = 0,
+                PBindings = bindingsPtr
+            };
+            return info;
+        }
+    }
+
+    public static unsafe DescriptorSetAllocateInfo DescriptorSetAllocateInfo(DescriptorPool pool,
+                                                                      DescriptorSetLayout[] setLayouts)
+    {
+        fixed (DescriptorSetLayout* setLayoutsPtr = setLayouts)
+        {
+            var info = new DescriptorSetAllocateInfo
+            {
+                SType = StructureType.DescriptorSetAllocateInfo,
+                PNext = null,
+                DescriptorPool = pool,
+                DescriptorSetCount = (uint)setLayouts.Length,
+                PSetLayouts = setLayoutsPtr
+            };
+            return info;
+        }
+    }
+
+    public static DescriptorBufferInfo DescriptorBufferInfo(Buffer buffer, uint range, uint offset = 0)
+    {
+        var info = new DescriptorBufferInfo
+        {
+            Buffer = buffer,
+            Offset = offset,
+            Range = range
+        };
+        return info;
     }
 }

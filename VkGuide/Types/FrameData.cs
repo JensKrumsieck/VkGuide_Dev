@@ -14,4 +14,7 @@ public struct FrameData
 
     public AllocatedBuffer CameraBuffer;
     public DescriptorSet GlobalDescriptor;
+
+    public AllocatedBuffer ObjectBuffer;
+    public DescriptorSet ObjectDescriptor;
 }
