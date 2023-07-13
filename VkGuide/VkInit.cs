@@ -7,7 +7,9 @@ namespace VkGuide;
 
 public static class VkInit
 {
-    public static CommandPoolCreateInfo CommandPoolCreateInfo(uint queueFamilyIndex, CommandPoolCreateFlags flags = CommandPoolCreateFlags.ResetCommandBufferBit)
+    public static CommandPoolCreateInfo CommandPoolCreateInfo(uint queueFamilyIndex,
+                                                              CommandPoolCreateFlags flags = CommandPoolCreateFlags
+                                                                  .ResetCommandBufferBit)
     {
         var commandPoolInfo = new CommandPoolCreateInfo
         {
@@ -19,7 +21,9 @@ public static class VkInit
         return commandPoolInfo;
     }
 
-    public static CommandBufferAllocateInfo CommandBufferAllocateInfo(CommandPool pool, uint count = 1, CommandBufferLevel level = CommandBufferLevel.Primary)
+    public static CommandBufferAllocateInfo CommandBufferAllocateInfo(CommandPool pool, uint count = 1,
+                                                                      CommandBufferLevel level =
+                                                                          CommandBufferLevel.Primary)
     {
         var cmdAllocInfo = new CommandBufferAllocateInfo
         {
@@ -31,7 +35,8 @@ public static class VkInit
         return cmdAllocInfo;
     }
 
-    public static unsafe PipelineShaderStageCreateInfo ShaderStageCreateInfo(ShaderStageFlags stage, ShaderModule shaderModule)
+    public static unsafe PipelineShaderStageCreateInfo ShaderStageCreateInfo(
+        ShaderStageFlags stage, ShaderModule shaderModule)
     {
         var info = new PipelineShaderStageCreateInfo
         {
@@ -39,14 +44,15 @@ public static class VkInit
             PNext = null,
             Stage = stage,
             Module = shaderModule,
-            PName = (byte*)SilkMarshal.StringToPtr("main")
+            PName = (byte*) SilkMarshal.StringToPtr("main")
         };
         return info;
     }
 
-    public static unsafe PipelineVertexInputStateCreateInfo VertexInputStateCreateInfo(VertexInputDescription? description = null)
+    public static unsafe PipelineVertexInputStateCreateInfo VertexInputStateCreateInfo(
+        VertexInputDescription? description = null)
     {
-        
+
         var info = new PipelineVertexInputStateCreateInfo
         {
             SType = StructureType.PipelineVertexInputStateCreateInfo,
@@ -58,11 +64,12 @@ public static class VkInit
         {
             fixed (VertexInputAttributeDescription* attributesPtr = description.Value.Attributes)
                 info.PVertexAttributeDescriptions = attributesPtr;
-            info.VertexAttributeDescriptionCount = (uint)description.Value.Attributes.Length;
+            info.VertexAttributeDescriptionCount = (uint) description.Value.Attributes.Length;
             fixed (VertexInputBindingDescription* bindingsPtr = description.Value.Bindings)
                 info.PVertexBindingDescriptions = bindingsPtr;
-            info.VertexBindingDescriptionCount = (uint)description.Value.Bindings.Length;
+            info.VertexBindingDescriptionCount = (uint) description.Value.Bindings.Length;
         }
+
         return info;
     }
 
@@ -126,7 +133,8 @@ public static class VkInit
         return colorBlendAttachment;
     }
 
-    public static unsafe PipelineLayoutCreateInfo PipelineLayoutCreateInfo(uint pushConstantRangeCount = 0, PushConstantRange* pushConstantRange = null)
+    public static unsafe PipelineLayoutCreateInfo PipelineLayoutCreateInfo(
+        uint pushConstantRangeCount = 0, PushConstantRange* pushConstantRange = null)
     {
         var info = new PipelineLayoutCreateInfo
         {
@@ -196,7 +204,7 @@ public static class VkInit
     }
 
     public static PipelineDepthStencilStateCreateInfo DepthStencilCreateInfo(bool bDepthTest, bool bDepthWrite,
-        CompareOp compareOp)
+                                                                             CompareOp compareOp)
     {
         var info = new PipelineDepthStencilStateCreateInfo
         {
@@ -211,5 +219,35 @@ public static class VkInit
             StencilTestEnable = false
         };
         return info;
+    }
+
+    public static DescriptorSetLayoutBinding DescriptorSetLayoutBinding(
+        DescriptorType type, ShaderStageFlags stageFlags, uint binding)
+    {
+        var setBind = new DescriptorSetLayoutBinding
+        {
+            Binding = binding,
+            DescriptorCount = 1,
+            DescriptorType = type,
+            PImmutableSamplers = null,
+            StageFlags = stageFlags
+        };
+        return setBind;
+    }
+
+    public static unsafe WriteDescriptorSet WriteDescriptorBuffer(DescriptorType type, DescriptorSet dstSet,
+                                                           DescriptorBufferInfo bufferInfo, uint binding)
+    {
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            PNext = null,
+            DstBinding = binding,
+            DstSet = dstSet,
+            DescriptorCount = 1,
+            DescriptorType = type,
+            PBufferInfo = &bufferInfo
+        };
+        return write;
     }
 }
