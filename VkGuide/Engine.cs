@@ -1,6 +1,8 @@
 ﻿using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using GlmSharp;
+using Silk.NET.Core.Native;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Vulkan;
@@ -26,6 +28,7 @@ public class Engine
     
     private SurfaceKHR _surface;
     private PhysicalDevice _physicalDevice;
+    private PhysicalDeviceProperties _gpuProperties;
     private Device _device;
 
     private SwapchainKHR _swapchain;
@@ -120,9 +123,14 @@ public class Engine
         var physicalDeviceInfo = new PhysicalDeviceSelector()
             .SetSurface(_surface)
             .RequireSwapChain()
+            .SetPreferredDeviceType(PreferredDeviceType.HighPerformance)
             .Select();
         _physicalDevice = physicalDeviceInfo.PhysicalDevice;
-
+        _gpuProperties = physicalDeviceInfo.PhysicalDeviceProperties;
+        fixed(byte* deviceNamePtr = _gpuProperties.DeviceName)
+            Console.WriteLine($"Selected GPU: {Marshal.PtrToStringAnsi((nint)deviceNamePtr)}");
+        Console.WriteLine($"The GPU has a minimum buffer alignment of {_gpuProperties.Limits.MinUniformBufferOffsetAlignment}");
+        
         var deviceInfo = new DeviceBuilder(physicalDeviceInfo)
             .EnableValidationLayers()
             .Build();

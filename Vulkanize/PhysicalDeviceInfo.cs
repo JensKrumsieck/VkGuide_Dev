@@ -8,4 +8,5 @@ public struct PhysicalDeviceInfo
     public required SurfaceKHR Surface;
     public required List<string> DeviceExtensions;
     public required PhysicalDeviceFeatures PreferredFeatures;
+    public required PhysicalDeviceProperties PhysicalDeviceProperties;
 }

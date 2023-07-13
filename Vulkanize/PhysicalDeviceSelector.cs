@@ -74,17 +74,19 @@ public class PhysicalDeviceSelector
             _vk.EnumeratePhysicalDevices(_instance, ref deviceCount, devicesPtr);
         
         var device = PickDevice(devices);
-
+        _vk.GetPhysicalDeviceProperties(device, out var properties);
+        
         return new PhysicalDeviceInfo
         {
             PhysicalDevice = device,
             Surface = _surface,
             DeviceExtensions = _deviceExtensions,
-            PreferredFeatures = _deviceFeatures
+            PreferredFeatures = _deviceFeatures,
+            PhysicalDeviceProperties = properties
         };
     }
     
-    private unsafe PhysicalDevice PickDevice(PhysicalDevice[] devices)
+    private PhysicalDevice PickDevice(PhysicalDevice[] devices)
     {
         var useGpu = 0;
         var deviceType = _preferredDeviceType switch
@@ -96,8 +98,7 @@ public class PhysicalDeviceSelector
         
         for (var i = 0; i < devices.Length; i++)
         {
-            PhysicalDeviceProperties properties;
-            _vk.GetPhysicalDeviceProperties(devices[i], &properties);
+            _vk.GetPhysicalDeviceProperties(devices[i], out var properties);
             if (!IsSuitable(devices[i])) continue;
             if (_preferredDeviceType == PreferredDeviceType.Any)
                 return devices[i];
@@ -129,11 +130,12 @@ public class PhysicalDeviceSelector
     }
 
     private bool SupportsRequestedFeatures(PhysicalDeviceFeatures supportedFeatures) => 
-        typeof(PhysicalDeviceFeatures)
-            .GetFields()
-            .Where(f => f.IsPublic)
-            .All(f => !(Bool32) f.GetValue(supportedFeatures)! || (Bool32) f.GetValue(_deviceFeatures)!);
-    
+        !(from fi in typeof(PhysicalDeviceFeatures)
+                     .GetFields().Where(f => f.IsPublic) 
+          let valueSupported = (Bool32) fi.GetValue(supportedFeatures)! 
+          let valueRequested = (Bool32) fi.GetValue(_deviceFeatures)! 
+          where valueRequested && !valueSupported select valueSupported).Any();
+
     private unsafe bool CheckDeviceExtensionsSupport(PhysicalDevice device)
     {
         uint extensionsCount = 0;
