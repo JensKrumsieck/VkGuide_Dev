@@ -3,6 +3,7 @@ using Silk.NET.Vulkan;
 using VkGuide.Types;
 using Buffer = Silk.NET.Vulkan.Buffer;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
+using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace VkGuide;
 
@@ -294,5 +295,38 @@ public static class VkInit
             Range = range
         };
         return info;
+    }
+
+    public static CommandBufferBeginInfo CommandBufferBeginInfo(CommandBufferUsageFlags flags = 0)
+    {
+        var info = new CommandBufferBeginInfo
+        {
+            SType = StructureType.CommandBufferBeginInfo,
+            PNext = null,
+            PInheritanceInfo = null,
+            Flags = flags
+        };
+        return info;
+    }
+
+    public static unsafe SubmitInfo SubmitInfo(CommandBuffer* commandBuffer, Semaphore[]? waitSemaphores = null, Semaphore[]? signalSemaphores = null, PipelineStageFlags* waitStage = null)
+    {
+        fixed (Semaphore* signalSemaphorePtr = signalSemaphores)
+        fixed (Semaphore* waitSemaphorePtr = waitSemaphores)
+        {
+            var info = new SubmitInfo
+            {
+                SType = StructureType.SubmitInfo,
+                PNext = null,
+                PWaitDstStageMask = waitStage,
+                WaitSemaphoreCount = (uint)(waitSemaphores?.Length??0),
+                PWaitSemaphores = waitSemaphorePtr,
+                SignalSemaphoreCount = (uint)(signalSemaphores?.Length??0),
+                PSignalSemaphores = signalSemaphorePtr,
+                CommandBufferCount = 1,
+                PCommandBuffers = commandBuffer
+            };
+            return info;
+        }
     }
 }

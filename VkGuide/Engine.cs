@@ -62,18 +62,20 @@ public class Engine
 
     private IInputContext _inputCtx;
     private IKeyboard _keyboard;
-    
-    private int _frameNumber;
-    private bool _isInitialized;
 
     private const int FrameOverlap = 2;
+    private int _frameNumber;
     private int CurrentFrame => _frameNumber % FrameOverlap;
     private FrameData[] _frames = new FrameData[FrameOverlap];
 
     private GpuSceneData _sceneParameters;
     private AllocatedBuffer _sceneParameterBuffer;
 
+    private UploadContext _uploadContext = new();
+
     private DeletionQueue _mainDeletionQueue = new();
+    
+    private bool _isInitialized;
     
     public void Init()
     {
@@ -215,6 +217,11 @@ public class Engine
             _mainDeletionQueue.Queue(() => _vk.DestroyCommandPool(_device, commandPool, null));
         }
 
+        var uploadPoolInfo = VkInit.CommandPoolCreateInfo(_graphicsQueueFamily);
+        _vk.CreateCommandPool(_device, uploadPoolInfo, null, out _uploadContext.CommandPool);
+        _mainDeletionQueue.Queue(() => _vk.DestroyCommandPool(_device, _uploadContext.CommandPool, null));
+        var uploadCmdAllocInfo = VkInit.CommandBufferAllocateInfo(_uploadContext.CommandPool);
+        _vk.AllocateCommandBuffers(_device, uploadCmdAllocInfo, out _uploadContext.CommandBuffer);
     }
 
     private unsafe void InitDefaultRenderPass()
@@ -336,6 +343,10 @@ public class Engine
 
     private unsafe void InitSyncStructures()
     {
+        var uploadFenceInfo = VkInit.FenceCreateInfo();
+        _vk.CreateFence(_device, uploadFenceInfo, null, out _uploadContext.UploadFence);
+        _mainDeletionQueue.Queue(() => _vk.DestroyFence(_device, _uploadContext.UploadFence, null));
+        
         var fenceInfo = VkInit.FenceCreateInfo(FenceCreateFlags.SignaledBit);
         var semaphoreInfo = VkInit.SemaphoreCreateInfo();
 
@@ -532,10 +543,37 @@ public class Engine
     
     private unsafe void UploadMesh(Mesh mesh)
     {
-        CreateBuffer<Vertex>(mesh.Vertices, out var allocatedBuffer);
-        mesh.VertexBuffer = allocatedBuffer;
-        _mainDeletionQueue.Queue(() => _vk.DestroyBuffer(_device, allocatedBuffer.Buffer, null));
-        _mainDeletionQueue.Queue(() => allocatedBuffer.Allocation.Dispose());
+        var bufferSize = (uint)(mesh.Vertices.Length * Unsafe.SizeOf<Vertex>());
+        CreateBuffer<Vertex>(mesh.Vertices, BufferUsageFlags.TransferSrcBit, MemoryUsage.CPU_Only, out var stagingBuffer);
+        var vertexBuffer = CreateBuffer(bufferSize, BufferUsageFlags.VertexBufferBit | BufferUsageFlags.TransferDstBit, MemoryUsage.GPU_Only);
+        ImmediateSubmit((cmd) =>
+        {
+            var copy = new BufferCopy(0, 0, bufferSize);
+            _vk.CmdCopyBuffer(cmd, stagingBuffer.Buffer, vertexBuffer.Buffer, 1, copy);
+        });
+        mesh.VertexBuffer = vertexBuffer;
+
+        _mainDeletionQueue.Queue(() =>
+        {
+            mesh.VertexBuffer.Allocation.Dispose();
+            _vk.DestroyBuffer(_device, mesh.VertexBuffer.Buffer, null);
+            stagingBuffer.Allocation.Dispose();
+            _vk.DestroyBuffer(_device, stagingBuffer.Buffer, null);
+        });
+    }
+
+    private unsafe void ImmediateSubmit(Action<CommandBuffer> function)
+    {
+        var cmd = _uploadContext.CommandBuffer;
+        var beginInfo = VkInit.CommandBufferBeginInfo(CommandBufferUsageFlags.OneTimeSubmitBit);
+        _vk.BeginCommandBuffer(cmd, beginInfo);
+        function(cmd);
+        _vk.EndCommandBuffer(cmd);
+        var submitInfo = VkInit.SubmitInfo(&cmd);
+        _vk.QueueSubmit(_graphicsQueue, 1, submitInfo, _uploadContext.UploadFence);
+        _vk.WaitForFences(_device, 1, _uploadContext.UploadFence, true, 999999999);
+        _vk.ResetFences(_device, 1, _uploadContext.UploadFence);
+        _vk.ResetCommandPool(_device, _uploadContext.CommandPool, 0);
     }
     
     private void InitScene()
@@ -569,17 +607,17 @@ public class Engine
         var allocInfo = new AllocationCreateInfo
         {
             Flags = AllocationCreateFlags.Mapped,
-            Usage = MemoryUsage.CPU_To_GPU
+            Usage = memoryUsage
         };
         var buffer = _allocator.CreateBuffer(bufferInfo, allocInfo, out var allocation);
         return new AllocatedBuffer {Buffer = buffer, Allocation = allocation};
     }
     
-    private void CreateBuffer<T>(ReadOnlySpan<T> span, out AllocatedBuffer allocatedBuffer)
+    private void CreateBuffer<T>(ReadOnlySpan<T> span, BufferUsageFlags usage, MemoryUsage memoryUsage, out AllocatedBuffer allocatedBuffer)
         where T : unmanaged
     {
-        allocatedBuffer = CreateBuffer((uint) span.Length * (uint) Unsafe.SizeOf<T>(), BufferUsageFlags.VertexBufferBit,
-                     MemoryUsage.CPU_To_GPU);
+        allocatedBuffer = CreateBuffer((uint) span.Length * (uint) Unsafe.SizeOf<T>(), usage,
+                     memoryUsage);
 
         if (!allocatedBuffer.Allocation.TryGetSpan(out Span<T> bufferSpan))
             throw new InvalidOperationException("Unable to get Span<T> to mapped allocation.");
@@ -624,13 +662,7 @@ public class Engine
             ref swapchainImageIndex);
         _vk.ResetCommandBuffer(_frames[CurrentFrame].MainCommandBuffer, 0);
         var cmd = _frames[CurrentFrame].MainCommandBuffer;
-        var cmdBeginInfo = new CommandBufferBeginInfo
-        {
-            SType = StructureType.CommandBufferBeginInfo,
-            PNext = null,
-            PInheritanceInfo = null,
-            Flags = CommandBufferUsageFlags.OneTimeSubmitBit
-        };
+        var cmdBeginInfo = VkInit.CommandBufferBeginInfo(CommandBufferUsageFlags.OneTimeSubmitBit);
         _vk.BeginCommandBuffer(cmd, cmdBeginInfo);
         var clearValue = new ClearValue();
         var flashB = MathF.Abs(MathF.Sin(_frameNumber / 120f));
@@ -659,18 +691,8 @@ public class Engine
         var waitStage = PipelineStageFlags.ColorAttachmentOutputBit;
         var waitSemaphore = _frames[CurrentFrame].PresentSemaphore;
         var signalSemaphore = _frames[CurrentFrame].RenderSemaphore;
-        var submit = new SubmitInfo
-        {
-            SType = StructureType.SubmitInfo,
-            PNext = null,
-            PWaitDstStageMask = &waitStage,
-            WaitSemaphoreCount = 1,
-            PWaitSemaphores = &waitSemaphore,
-            SignalSemaphoreCount = 1,
-            PSignalSemaphores = &signalSemaphore,
-            CommandBufferCount = 1,
-            PCommandBuffers = &cmd
-        };
+        var submit = VkInit.SubmitInfo(&cmd, new[] {waitSemaphore}, new[] {signalSemaphore}, &waitStage);
+       
         _vk.QueueSubmit(_graphicsQueue, 1, submit, _frames[CurrentFrame].RenderFence);
 
         fixed (SwapchainKHR* swapchainPtr = &_swapchain)
