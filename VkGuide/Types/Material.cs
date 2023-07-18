@@ -2,8 +2,9 @@
 
 namespace VkGuide.Types;
 
-public class Material{
-    
+public class Material
+{
+    public DescriptorSet TextureSet;
     public Pipeline Pipeline;
     public PipelineLayout PipelineLayout;
 }

@@ -48,12 +48,10 @@ public class Engine
     private RenderPass _renderPass;
     private Framebuffer[] _framebuffers;
 
-    private Pipeline _meshPipeline;
-    private PipelineLayout _meshPipelineLayout;
-
     private Camera _mainCamera;
     private DescriptorSetLayout _globalSetLayout;
     private DescriptorSetLayout _objectSetLayout;
+    private DescriptorSetLayout _singleTextureSetLayout;
     private DescriptorPool _descriptorPool;
     
     private List<RenderObject> _renderables = new();
@@ -72,7 +70,7 @@ public class Engine
     private GpuSceneData _sceneParameters;
     private AllocatedBuffer _sceneParameterBuffer;
 
-    private UploadContext _uploadContext = new();
+    private UploadContext _uploadContext;
 
     internal DeletionQueue _mainDeletionQueue = new();
     
@@ -376,7 +374,8 @@ public class Engine
         {
             new(DescriptorType.UniformBuffer, 10),
             new(DescriptorType.UniformBufferDynamic, 10),
-            new(DescriptorType.StorageBuffer, 10)
+            new(DescriptorType.StorageBuffer, 10),
+            new(DescriptorType.CombinedImageSampler, 10)
         };
         fixed(DescriptorPoolSize* sizesPtr = sizes)
         {
@@ -446,6 +445,12 @@ public class Engine
                 objBuffer.Allocation.Dispose();
             });
         }
+
+        var textureBind =
+            VkInit.DescriptorSetLayoutBinding(DescriptorType.CombinedImageSampler, ShaderStageFlags.FragmentBit, 0);
+        var setTextureInfo = VkInit.DescriptorSetLayoutCreateInfo(new[] {textureBind});
+        _vk.CreateDescriptorSetLayout(_device, setTextureInfo, null, out _singleTextureSetLayout);
+        _mainDeletionQueue.Queue(() => _vk.DestroyDescriptorSetLayout(_device, _singleTextureSetLayout, null));
         _mainDeletionQueue.Queue(() => _vk.DestroyDescriptorPool(_device, _descriptorPool, null));
     }
 
@@ -455,10 +460,13 @@ public class Engine
             Console.WriteLine("Failed to load tri vert shader");
         if (!LoaderShaderModule("default_lit.frag.spv", out var triFragShader))
             Console.WriteLine("Failed to load frag shader");
+        if (!LoaderShaderModule("textured_lit.frag.spv", out var texturedLitFragShader))
+            Console.WriteLine("Failed to load frag shader");
         _mainDeletionQueue.Queue(() =>
         {
             _vk.DestroyShaderModule(_device, triVertShader, null);
             _vk.DestroyShaderModule(_device, triFragShader, null);
+            _vk.DestroyShaderModule(_device, texturedLitFragShader, null);
         });
         
         var pushConstant = new PushConstantRange(ShaderStageFlags.VertexBit, 0, (uint) Unsafe.SizeOf<MeshPushConstants>());
@@ -467,8 +475,8 @@ public class Engine
         layoutInfo.SetLayoutCount = (uint)setLayouts.Length;
         fixed (DescriptorSetLayout* setLayoutsPtr = setLayouts)
             layoutInfo.PSetLayouts = setLayoutsPtr;
-        _vk.CreatePipelineLayout(_device, layoutInfo, null, out _meshPipelineLayout);
-        _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, _meshPipelineLayout, null));
+        _vk.CreatePipelineLayout(_device, layoutInfo, null, out var meshPipelineLayout);
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, meshPipelineLayout, null));
         var vertexInputInfo = VkInit.VertexInputStateCreateInfo(Vertex.GetVertexDescription());
         var builder = new PipelineBuilder
         {
@@ -492,12 +500,32 @@ public class Engine
             Rasterizer = VkInit.RasterizationStateCreateInfo(PolygonMode.Fill),
             Multisampling = VkInit.MultisampleStateCreateInfo(),
             ColorBlendAttachment = VkInit.ColorBlendAttachmentState(),
-            PipelineLayout = _meshPipelineLayout,
+            PipelineLayout = meshPipelineLayout,
             DepthStencil = VkInit.DepthStencilCreateInfo(true, true, CompareOp.LessOrEqual)
         };
-        _meshPipeline = builder.Build(_device, _renderPass);
-        CreateMaterial(_meshPipeline, _meshPipelineLayout, "defaultmesh");
-        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, _meshPipeline, null));
+        var meshPipeline = builder.Build(_device, _renderPass);
+        CreateMaterial(meshPipeline, meshPipelineLayout, "defaultmesh");
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, meshPipeline, null));
+        
+        var texturedSetLayouts = new[]{_globalSetLayout, _objectSetLayout, _singleTextureSetLayout};
+        var texturedPipelineLayoutInfo = layoutInfo with
+        {
+            SetLayoutCount = (uint) texturedSetLayouts.Length
+        };
+        fixed (DescriptorSetLayout* layoutsPtr = texturedSetLayouts)
+            texturedPipelineLayoutInfo.PSetLayouts = layoutsPtr;
+        
+        _vk.CreatePipelineLayout(_device, texturedPipelineLayoutInfo, null, out var texturePipelineLayout);
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipelineLayout(_device, texturePipelineLayout, null));
+        builder.ShaderStages = new[]
+        {
+            VkInit.ShaderStageCreateInfo(ShaderStageFlags.VertexBit, triVertShader),
+            VkInit.ShaderStageCreateInfo(ShaderStageFlags.FragmentBit, texturedLitFragShader)
+        };
+        builder.PipelineLayout = texturePipelineLayout;
+        var texturedPipeline = builder.Build(_device, _renderPass);
+        CreateMaterial(texturedPipeline, texturePipelineLayout, "texturedmesh");
+        _mainDeletionQueue.Queue(() => _vk.DestroyPipeline(_device, texturedPipeline, null));
     }
     
     private unsafe bool LoaderShaderModule(string path, out ShaderModule shaderModule)
@@ -540,6 +568,10 @@ public class Engine
 
         _meshes["monkey"] = monkeyMesh;
         _meshes["triangle"] = triangleMesh;
+
+        var lostEmpireMesh = Mesh.LoadFromObj("./assets/lost_empire.obj");
+        UploadMesh(lostEmpireMesh);
+        _meshes["lostEmpire"] = lostEmpireMesh;
     }
     
     private unsafe void UploadMesh(Mesh mesh)
@@ -588,7 +620,7 @@ public class Engine
         _textures["empire_diffuse"] = texture;
     }
     
-    private void InitScene()
+    private unsafe void InitScene()
     {
         var monkey = new RenderObject
             {Mesh = _meshes["monkey"], Material = _materials["defaultmesh"], TransformMatrix = mat4.Identity};
@@ -605,9 +637,31 @@ public class Engine
                 };
                 _renderables.Add(tri);
             }
+
+        var samplerInfo = VkInit.SamplerCreateInfo(Filter.Nearest);
+        _vk.CreateSampler(_device, samplerInfo, null, out var blockySampler);
+        _mainDeletionQueue.Queue(() => _vk.DestroySampler(_device, blockySampler, null));
+        var texturedMat = _materials["texturedmesh"];
+        var allocInfo = VkInit.DescriptorSetAllocateInfo(_descriptorPool, new[] {_singleTextureSetLayout});
+        _vk.AllocateDescriptorSets(_device, allocInfo, out texturedMat.TextureSet);
+        var imageBufferInfo = new DescriptorImageInfo
+        {
+            Sampler = blockySampler, ImageView = _textures["empire_diffuse"].ImageView,
+            ImageLayout = ImageLayout.ShaderReadOnlyOptimal
+        };
+        var texture1 = VkInit.WriteDescriptorImage(DescriptorType.CombinedImageSampler, texturedMat.TextureSet,
+            imageBufferInfo, 0);
+        _vk.UpdateDescriptorSets(_device, 1, texture1, 0, null);
+        _materials["texturedmesh"] = texturedMat;
+        var lostEmpire = new RenderObject
+        {
+            Mesh = _meshes["lostEmpire"], Material = _materials["texturedmesh"],
+            TransformMatrix = mat4.Translate(5, -10, 0)
+        };
+        _renderables.Add(lostEmpire);
     }
 
-    internal AllocatedBuffer CreateBuffer(uint size, BufferUsageFlags usage, MemoryUsage memoryUsage)
+    internal AllocatedBuffer CreateBuffer(uint size, BufferUsageFlags usage, MemoryUsage memoryUsage, AllocationCreateFlags flags= 0)
     {
         var bufferInfo = new BufferCreateInfo
         {
@@ -618,7 +672,7 @@ public class Engine
         };
         var allocInfo = new AllocationCreateInfo
         {
-            Flags = AllocationCreateFlags.Mapped,
+            Flags = flags,
             Usage = memoryUsage
         };
         var buffer = _allocator.CreateBuffer(bufferInfo, allocInfo, out var allocation);
@@ -629,7 +683,7 @@ public class Engine
         where T : unmanaged
     {
         allocatedBuffer = CreateBuffer((uint) span.Length * (uint) Unsafe.SizeOf<T>(), usage,
-                     memoryUsage);
+                     memoryUsage, AllocationCreateFlags.Mapped);
 
         if (!allocatedBuffer.Allocation.TryGetSpan(out Span<T> bufferSpan))
             throw new InvalidOperationException("Unable to get Span<T> to mapped allocation.");
@@ -764,6 +818,9 @@ public class Engine
                                           _frames[CurrentFrame].GlobalDescriptor, 1, &uniformOffsets);
                 _vk.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, renderObject.Material.PipelineLayout, 1, 1,
                                           _frames[CurrentFrame].ObjectDescriptor, 0, null);
+                if(renderObject.Material.TextureSet.Handle != 0)
+                    _vk.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, renderObject.Material.PipelineLayout, 2, 1,
+                    renderObject.Material.TextureSet, 0, null);
             }
 
             var constants = new MeshPushConstants {RenderMatrix = renderObject.TransformMatrix};

@@ -22,13 +22,7 @@
         <PackageReference Include="SkiaSharp" Version="2.88.3" />
     </ItemGroup>
     <ItemGroup>
-      <None Update="Assets\monkey_smooth.mtl">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
-      <None Update="Assets\monkey_smooth.obj">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
-      <None Update="Assets\lost_empire-RGBA.png">
+      <None Update="Assets\*">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
     </ItemGroup>

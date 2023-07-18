@@ -12,7 +12,7 @@ public static class VkUtil
     public static unsafe bool LoadImageFromFile(Engine engine, string filename, out AllocatedImage outImage)
     {
         using var fs = File.Open(filename, FileMode.Open);
-        var img = SKBitmap.Decode(fs);
+        using var img = SKBitmap.Decode(fs);
         if(img is null) {
             Console.WriteLine("Failed to load texture");
             outImage = new AllocatedImage();

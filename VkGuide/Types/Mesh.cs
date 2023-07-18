@@ -1,4 +1,6 @@
-﻿using Silk.NET.Assimp;
+﻿using System.Numerics;
+using System.Runtime.InteropServices.ComTypes;
+using Silk.NET.Assimp;
 
 namespace VkGuide.Types;
 
@@ -28,12 +30,14 @@ public class Mesh
                         var index = face.MIndices[i];
                         var position = mesh->MVertices[index];
                         var normal = mesh->MNormals[index];
-
+                        var tex = mesh->MTextureCoords[0][index];
+                        var uv = new Vector2(tex.X, 1 - tex.Y);
                         var vertex = new Vertex
                         {
                             Position = position,
                             Normal = normal,
-                            Color = normal
+                            Color = normal,
+                            Uv = uv
                         };
                         vertices.Add(vertex);
                     }

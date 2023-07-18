@@ -12,6 +12,7 @@ public unsafe struct Vertex
     public Vector3 Position;
     public Vector3 Normal;
     public Vector3 Color;
+    public Vector2 Uv;
 
     public static VertexInputDescription GetVertexDescription()
     {
@@ -43,6 +44,13 @@ public unsafe struct Vertex
             Format = Format.R32G32B32Sfloat,
             Offset = (uint) Marshal.OffsetOf<Vertex>(nameof(Color))
         };
+        var uvAttribute = new VertexInputAttributeDescription
+        {
+            Binding = 0,
+            Location = 3,
+            Format = Format.R32G32Sfloat,
+            Offset = (uint) Marshal.OffsetOf<Vertex>(nameof(Uv))
+        };
         return new VertexInputDescription
         {
             Bindings = new[] {mainBinding},
@@ -50,7 +58,8 @@ public unsafe struct Vertex
             {
                 positionAttribute,
                 normalAttribute,
-                colorAttribute
+                colorAttribute,
+                uvAttribute
             }
         };
     }

@@ -329,4 +329,35 @@ public static class VkInit
             return info;
         }
     }
+
+    public static SamplerCreateInfo SamplerCreateInfo(Filter filters, SamplerAddressMode samplerAddressMode = SamplerAddressMode.Repeat)
+    {
+        var info = new SamplerCreateInfo
+        {
+            SType = StructureType.SamplerCreateInfo,
+            PNext = null,
+            MagFilter = filters,
+            MinFilter = filters,
+            AddressModeU = samplerAddressMode,
+            AddressModeV = samplerAddressMode,
+            AddressModeW = samplerAddressMode
+        };
+        return info;
+    }
+
+    public static unsafe WriteDescriptorSet WriteDescriptorImage(DescriptorType type, DescriptorSet dstSet,
+        DescriptorImageInfo imageInfo, uint binding)
+    {
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            PNext = null,
+            DstBinding = binding,
+            DstSet = dstSet,
+            DescriptorCount = 1,
+            DescriptorType = type,
+            PImageInfo = &imageInfo
+        };
+        return write;
+    }
 }
