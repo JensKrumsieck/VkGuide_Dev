@@ -17,14 +17,18 @@
         <ShaderFiles Include="$(ProjectDir)**\*.spv" />
     </ItemGroup>
     <ItemGroup>
-      <PackageReference Include="GlmSharp" Version="0.9.8" />
-      <PackageReference Include="Silk.NET.Assimp" Version="2.17.1" />
+        <PackageReference Include="GlmSharp" Version="0.9.8" />
+        <PackageReference Include="Silk.NET.Assimp" Version="2.17.1" />
+        <PackageReference Include="SkiaSharp" Version="2.88.3" />
     </ItemGroup>
     <ItemGroup>
       <None Update="Assets\monkey_smooth.mtl">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
       <None Update="Assets\monkey_smooth.obj">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="Assets\lost_empire-RGBA.png">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
     </ItemGroup>

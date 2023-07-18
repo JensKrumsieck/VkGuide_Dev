@@ -18,8 +18,8 @@ namespace VkGuide;
 
 public class Engine
 {
-    private readonly Vk _vk = Vulkanize.Vulkanize.Vk;
-    private VulkanMemoryAllocator _allocator;
+    internal readonly Vk _vk = Vulkanize.Vulkanize.Vk;
+    internal VulkanMemoryAllocator _allocator;
     
     private IWindow _window;
     private Instance _instance;
@@ -28,7 +28,7 @@ public class Engine
     private SurfaceKHR _surface;
     private PhysicalDevice _physicalDevice;
     private PhysicalDeviceProperties _gpuProperties;
-    private Device _device;
+    internal Device _device;
 
     private SwapchainKHR _swapchain;
     private KhrSwapchain _khrSwapchain;
@@ -59,6 +59,7 @@ public class Engine
     private List<RenderObject> _renderables = new();
     private Dictionary<string, Material> _materials = new();
     private Dictionary<string, Mesh> _meshes = new();
+    private Dictionary<string, Texture> _textures = new();
 
     private IInputContext _inputCtx;
     private IKeyboard _keyboard;
@@ -73,7 +74,7 @@ public class Engine
 
     private UploadContext _uploadContext = new();
 
-    private DeletionQueue _mainDeletionQueue = new();
+    internal DeletionQueue _mainDeletionQueue = new();
     
     private bool _isInitialized;
     
@@ -524,7 +525,7 @@ public class Engine
             Position = new vec3(0, -6, -10),
             Extent = _windowExtent
         };
-        
+        LoadImages();
         var vertices = new Vertex[]
         {
             new() {Position = new Vector3(1, 1, 0), Color = new Vector3(0, 1, 0)},
@@ -562,7 +563,7 @@ public class Engine
         });
     }
 
-    private unsafe void ImmediateSubmit(Action<CommandBuffer> function)
+    internal unsafe void ImmediateSubmit(Action<CommandBuffer> function)
     {
         var cmd = _uploadContext.CommandBuffer;
         var beginInfo = VkInit.CommandBufferBeginInfo(CommandBufferUsageFlags.OneTimeSubmitBit);
@@ -574,6 +575,17 @@ public class Engine
         _vk.WaitForFences(_device, 1, _uploadContext.UploadFence, true, 999999999);
         _vk.ResetFences(_device, 1, _uploadContext.UploadFence);
         _vk.ResetCommandPool(_device, _uploadContext.CommandPool, 0);
+    }
+
+    private unsafe void LoadImages()
+    {
+        if(!VkUtil.LoadImageFromFile(this, "./assets/lost_empire-RGBA.png", out var lostEmpireImage))
+            return;
+        var texture = new Texture {Image = lostEmpireImage};
+        var imageInfo = VkInit.ImageViewCreateInfo(Format.R8G8B8A8Srgb, lostEmpireImage.Image, ImageAspectFlags.ColorBit);
+        _vk.CreateImageView(_device, imageInfo, null, out texture.ImageView);
+        _mainDeletionQueue.Queue(() => _vk.DestroyImageView(_device, texture.ImageView, null));
+        _textures["empire_diffuse"] = texture;
     }
     
     private void InitScene()
@@ -595,7 +607,7 @@ public class Engine
             }
     }
 
-    private AllocatedBuffer CreateBuffer(uint size, BufferUsageFlags usage, MemoryUsage memoryUsage)
+    internal AllocatedBuffer CreateBuffer(uint size, BufferUsageFlags usage, MemoryUsage memoryUsage)
     {
         var bufferInfo = new BufferCreateInfo
         {
@@ -612,7 +624,7 @@ public class Engine
         var buffer = _allocator.CreateBuffer(bufferInfo, allocInfo, out var allocation);
         return new AllocatedBuffer {Buffer = buffer, Allocation = allocation};
     }
-    
+
     private void CreateBuffer<T>(ReadOnlySpan<T> span, BufferUsageFlags usage, MemoryUsage memoryUsage, out AllocatedBuffer allocatedBuffer)
         where T : unmanaged
     {
