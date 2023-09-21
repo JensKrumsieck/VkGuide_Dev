@@ -19,7 +19,7 @@
     <ItemGroup>
         <PackageReference Include="GlmSharp" Version="0.9.8" />
         <PackageReference Include="Silk.NET.Assimp" Version="2.17.1" />
-        <PackageReference Include="SkiaSharp" Version="2.88.3" />
+        <PackageReference Include="SkiaSharp" Version="2.88.6" />
     </ItemGroup>
     <ItemGroup>
       <None Update="Assets\*">
